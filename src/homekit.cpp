@@ -175,10 +175,12 @@ void printTaskInfo(const char *buf)
     {
         uxTaskGetSystemState(tasks, count, NULL);
         Serial.printf("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-\n");
+        Serial.printf("Name                    Core\tPri\tStack\n");
         for (size_t i = 0; i < count; i++)
         {
-            Serial.printf("%s\t%s\t%d\t\t%d\n", (char *)tasks[i].pcTaskName,
+            Serial.printf("%s\t%s\t%4d\t%3d\t%5d\n", (char *)tasks[i].pcTaskName,
                           strlen((char *)tasks[i].pcTaskName) > 7 ? "" : "\t",
+                          (int)(tasks[i].xCoreID < 16)?tasks[i].xCoreID:-1,
                           (int)tasks[i].uxBasePriority, (int)tasks[i].usStackHighWaterMark);
         }
         Serial.printf("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-\n\n");
