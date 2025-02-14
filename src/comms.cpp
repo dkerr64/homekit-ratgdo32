@@ -34,7 +34,6 @@
 #include "../lib/ratgdo/secplus2.h"
 #else
 #include "gdo.h"
-// #include <magic_enum.hpp>
 #endif
 
 #include "comms.h"
@@ -224,7 +223,6 @@ static void gdo_event_handler(const gdo_status_t *status, gdo_cb_event_t event, 
     case GDO_CB_EVENT_DOOR_POSITION:
         RINFO(TAG, "Event door: %s, %3d%%, target: %3d%%", gdo_door_state_to_string(status->door),
               +status->door_position / 100, (status->door_target >= 0) ? status->door_target / 100 : -1);
-        // RINFO(TAG, "Door State: %s", (magic_enum::enum_name(status->door)).data());
         garage_door.active = true;
         notify_homekit_current_door_state_change(gdo_to_homekit_door_current_state[status->door]);
         break;
