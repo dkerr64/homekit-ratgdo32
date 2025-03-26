@@ -87,10 +87,11 @@ void vehicle_loop()
         return;
 
     uint8_t dataReady = 0;
-    if ((distanceSensor.VL53L4CX_GetMeasurementDataReady(&dataReady) == 0) && (dataReady > 0))
+    VL53L4CX_Error err = VL53L4CX_ERROR_NONE;
+    if (((err = distanceSensor.VL53L4CX_GetMeasurementDataReady(&dataReady)) == VL53L4CX_ERROR_NONE) && (dataReady > 0))
     {
         VL53L4CX_MultiRangingData_t distanceData;
-        if (distanceSensor.VL53L4CX_GetMultiRangingData(&distanceData) == VL53L4CX_ERROR_NONE)
+        if ((err = distanceSensor.VL53L4CX_GetMultiRangingData(&distanceData)) == VL53L4CX_ERROR_NONE)
         {
             if (distanceData.NumberOfObjectsFound > 0)
             {
@@ -119,6 +120,7 @@ void vehicle_loop()
                     case VL53L4CX_RANGESTATUS_WRAP_TARGET_FAIL:
                     case VL53L4CX_RANGESTATUS_TARGET_PRESENT_LACK_OF_SIGNAL:
                         // Bad data... assume no object, or if is one is past MAX_DISTANCE range.
+                        ESP_LOGI(TAG, "Unusual VL53L4CX Range Status: %d", distanceData.RangeData[i].RangeStatus);
                         distance = MAX_DISTANCE;
                         break;
                     default:
@@ -134,8 +136,17 @@ void vehicle_loop()
                 calculatePresence(MAX_DISTANCE);
             }
         }
+        else
+        {
+            ESP_LOGE(TAG, "VL53L4CX_GetMultiRangingData reports error: %d", err);
+        }
         // And start the sensor measuring again...
         distanceSensor.VL53L4CX_ClearInterruptAndStartMeasurement();
+    }
+    else
+    {
+        if (err)
+            ESP_LOGE(TAG, "VL53L4CX_GetMeasurementDataReady reports error: %d", err);
     }
 
     uint64_t current_millis = millis64();
