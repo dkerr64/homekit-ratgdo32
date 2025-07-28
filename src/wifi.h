@@ -14,20 +14,12 @@
  */
 #pragma once
 
-// C/C++ language includes
-#include <stdint.h>
+#ifdef ESP8266
+// This whole file only applies for ESP8266.
+// On ESP32, WiFi is handled by the HomeSpan library
+#include <ESP8266WiFi.h>
 
-extern void setup_comms();
-extern void comms_loop();
-
-extern GarageDoorCurrentState open_door();
-extern GarageDoorCurrentState close_door();
-
-extern bool set_lock(bool value, bool verify = true);
-extern bool set_light(bool value, bool verify = true);
-
-extern void save_rolling_code();
-extern void reset_door();
-
-extern uint32_t doorControlType;
-extern GarageDoorCurrentState doorState;
+void wifi_loop();
+void wifi_connect();
+extern station_config wifiConf;
+#endif

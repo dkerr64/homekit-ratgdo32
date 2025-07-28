@@ -1,5 +1,5 @@
 /****************************************************************************
- * RATGDO HomeKit for ESP32
+ * RATGDO HomeKit
  * https://ratcloud.llc
  * https://github.com/PaulWieland/ratgdo
  *
@@ -18,10 +18,14 @@
 #include <algorithm>
 
 // ESP system includes
+#ifdef ESP8266
+#include <ESP8266WiFi.h>
+#include <ESP8266HTTPClient.h>
+#include "LittleFS.h"
+#else
 #include <esp_sntp.h>
-
-// Arduino system includes
 #include <HTTPClient.h>
+#endif
 
 // RATGDO project includes
 #include "ratgdo.h"
@@ -42,14 +46,10 @@ const char www_realm[] = "RATGDO Login Required";
 // automatically reboot after X seconds
 uint32_t rebootSeconds = 0;
 
-uint64_t ARDUINO_ISR_ATTR millis64()
-{
-    return (uint64_t)(esp_timer_get_time() / 1000ULL);
-}
-
-bool clockSet = false;
+time_t clockSet = 0;
 bool enableNTP = false;
 uint64_t lastRebootAt = 0;
+#define SNTP_SYNC_INTERVAL (60 * 60 * 1000) // 60 minutes
 
 bool get_auto_timezone()
 {
@@ -76,10 +76,23 @@ bool get_auto_timezone()
     return success;
 }
 
+#ifdef ESP8266
+void time_is_set(bool from_sntp)
+{
+    clockSet = time(NULL);
+}
+
+uint32_t sntp_update_delay_MS_rfc_not_less_than_15000()
+{
+    return SNTP_SYNC_INTERVAL; // update every 60 minutes
+}
+#else
 void time_is_set(timeval *tv)
 {
-    clockSet = true;
+    // Keep this callback function short and simple. Do not use our logging functions, as it may hang.
+    clockSet = tv->tv_sec;
 }
+#endif
 
 char *timeString(time_t reqTime, bool syslog)
 {
@@ -118,7 +131,7 @@ char *timeString(time_t reqTime, bool syslog)
 
 char *make_rfc952(char *dest, const char *src, int size)
 {
-    // Make device name RFC952 complient (simple, just checking for the basics)
+    // Make device name RFC952 compliant (simple, just checking for the basics)
     // RFC952 says max len of 24, [a-z][A-Z][0-9][-.] and no dash or period in last char.
     int i = 0;
     while (i <= std::min(24, size - 1) && src[i] != 0)
@@ -139,7 +152,6 @@ char *make_rfc952(char *dest, const char *src, int size)
 void load_all_config_settings()
 {
     ESP_LOGI(TAG, "=== Load all config settings for %s", device_name);
-
     userConfig->load();
     // Set globals...
     strlcpy(device_name, userConfig->getDeviceName().c_str(), sizeof(device_name));
@@ -162,7 +174,6 @@ void load_all_config_settings()
     ESP_LOGI(TAG, "   subnetMask:          %s", userConfig->getSubnetMask().c_str());
     ESP_LOGI(TAG, "   gatewayIP:           %s", userConfig->getGatewayIP().c_str());
     ESP_LOGI(TAG, "   nameserverIP:        %s", userConfig->getNameserverIP().c_str());
-    ESP_LOGI(TAG, "   enableIPv6:          %s", userConfig->getEnableIPv6() ? "true" : "false");
     ESP_LOGI(TAG, "   wwwPWrequired:       %s", userConfig->getPasswordRequired() ? "true" : "false");
     ESP_LOGI(TAG, "   wwwUsername:         %s", userConfig->getwwwUsername().c_str());
     ESP_LOGI(TAG, "   wwwCredentials:      %s", userConfig->getwwwCredentials().c_str());
@@ -179,29 +190,40 @@ void load_all_config_settings()
     ESP_LOGI(TAG, "   syslogEn:            %s", userConfig->getSyslogEn() ? "true" : "false");
     ESP_LOGI(TAG, "   syslogIP:            %s", userConfig->getSyslogIP().c_str());
     ESP_LOGI(TAG, "   syslogPort:          %d", userConfig->getSyslogPort());
+#ifndef ESP8266
+    // Features not available on ESP8266
     ESP_LOGI(TAG, "   vehicleThreshold:    %d", userConfig->getVehicleThreshold());
+    ESP_LOGI(TAG, "   vehicleHomeKit:      %s", userConfig->getVehicleHomeKit() ? "true" : "false");
     ESP_LOGI(TAG, "   laserEnabled:        %s", userConfig->getLaserEnabled() ? "true" : "false");
     ESP_LOGI(TAG, "   laserHomeKit:        %s", userConfig->getLaserHomeKit() ? "true" : "false");
     ESP_LOGI(TAG, "   assistDuration:      %d", userConfig->getAssistDuration());
+    ESP_LOGI(TAG, "   occupancyDuration:   %d", userConfig->getOccupancyDuration());
+    ESP_LOGI(TAG, "   enableIPv6:          %s", userConfig->getEnableIPv6() ? "true" : "false");
+#endif
     ESP_LOGI(TAG, "RFC952 device hostname: %s", device_name_rfc952);
 
     // Only enable NTP client if not in soft AP mode.
     enableNTP = !softAPmode && userConfig->getEnableNTP();
     if (enableNTP)
     {
+#ifdef ESP8266
+        settimeofday_cb(time_is_set);
+#else
         sntp_set_time_sync_notification_cb(time_is_set);
+        sntp_set_sync_interval(SNTP_SYNC_INTERVAL);
+#endif
         ESP_LOGI(TAG, "Timezone: %s", userConfig->getTimeZone().c_str());
         std::string tz = userConfig->getTimeZone();
         size_t pos = tz.find(';');
         if (pos != std::string::npos)
         {
             // semicolon may separate continent/city from posix TZ string
-            // if no semicolon then no POSIX code, so use UTC
             ESP_LOGI(TAG, "Set timezone: %s", tz.substr(pos + 1).c_str());
             configTzTime(tz.substr(pos + 1).c_str(), NTP_SERVER);
         }
         else
         {
+            // if no semicolon then no POSIX code, so use UTC
             ESP_LOGI(TAG, "Set timezone: UTC0");
             configTzTime("UTC0", NTP_SERVER);
         }
@@ -220,8 +242,18 @@ void sync_and_restart()
         // In soft AP mode we never initialized garage door comms, so don't save rolling code.
         save_rolling_code();
     }
-
+#ifdef ESP8266
+    WiFi.mode(WIFI_OFF);
+    WiFi.forceSleepBegin();
+    // Save current logs in case needed for future analysis
+    File file = LittleFS.open(REBOOT_LOG_MSG_FILE, "w");
+    printMessageLog(file);
+    file.close();
+    LittleFS.end();
+#else
+    // Save current logs in case needed for future analysis
     ratgdoLogger->saveMessageLog();
+#endif
     delay(100);
     ESP.restart();
 }

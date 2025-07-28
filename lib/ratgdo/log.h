@@ -32,7 +32,7 @@
 // space for other data in here, so during development monitor logs and adjust
 // this smaller if necessary.  IRAM malloc's are all done during startup.
 // On ESP32 we save reboot and crash logs in RTC noinit memory, which is approx 8KB.
-#define LOG_BUFFER_SIZE (1024 * 3)
+#define LOG_BUFFER_SIZE (512 * 7)
 #else
 #define LOG_BUFFER_SIZE 1024
 #endif
@@ -49,9 +49,9 @@ extern int16_t crashCount;
 
 typedef struct logBuffer
 {
-    uint16_t wrapped;                 // two bytes
-    uint16_t head;                    // two bytes
-    char buffer[LOG_BUFFER_SIZE - 4]; // sized so whole struct is LOG_BUFFER_SIZE bytes
+    uint16_t wrapped;                                              // two bytes
+    uint16_t head;                                                 // two bytes
+    char buffer[LOG_BUFFER_SIZE - sizeof(wrapped) - sizeof(head)]; // sized so whole struct is LOG_BUFFER_SIZE bytes
 } logBuffer;
 
 class LOG
@@ -70,7 +70,8 @@ public:
     static LOG *getInstance() { return instancePtr; }
 
     void logToBuffer(const char *fmt, va_list args);
-    void logToBuffer(const char *fmt, ...) {
+    void logToBuffer(const char *fmt, ...)
+    {
         va_list args;
         va_start(args, fmt);
         logToBuffer(fmt, args);

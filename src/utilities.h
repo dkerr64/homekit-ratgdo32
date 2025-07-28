@@ -1,5 +1,5 @@
 /****************************************************************************
- * RATGDO HomeKit for ESP32
+ * RATGDO HomeKit
  * https://ratcloud.llc
  * https://github.com/PaulWieland/ratgdo
  *
@@ -13,18 +13,23 @@
  *
  */
 #pragma once
+
 // C/C++ language includes
 #include <stdint.h>
+#ifndef ESP8266
 #include <time.h>
-
-// ESP system includes
 #include <esp_timer.h>
+#endif
 
-// RATGDO project includes
-// #include "homekit_decl.h"
-// #include "ratgdo.h"
+#ifdef ESP8266
+typedef unsigned long _millis_t;
+#define _millis() ((_millis_t)millis())
+#else
+typedef unsigned long long _millis_t;
+#define _millis() ((_millis_t)(esp_timer_get_time() / 1000ULL))
+#endif
 
-extern bool clockSet;
+extern time_t clockSet;
 extern uint64_t lastRebootAt;
 extern char *timeString(time_t reqTime = 0, bool syslog = false);
 extern bool enableNTP;
@@ -41,15 +46,15 @@ extern bool get_auto_timezone();
 #define IRAM_START \
     {              \
         HeapSelectIram ephemeral;
-#define IRAM_END(location)                                                 \
-    ESP_LOGI(TAG, "Free IRAM heap (%s): %d", location, ESP.getFreeHeap()); \
+#define IRAM_END(location)                                                                \
+    ESP_LOGI("ratgdo-utilities", "Free IRAM heap (%s): %d", location, ESP.getFreeHeap()); \
     }
-#else
+#else // MMU_IRAM_HEAP
 #define IRAM_START {
-#define IRAM_END(location)                                            \
-    ESP_LOGI(TAG, "Free heap (%s): %d", location, ESP.getFreeHeap()); \
+#define IRAM_END(location)                                                           \
+    ESP_LOGI("ratgdo-utilities", "Free heap (%s): %d", location, ESP.getFreeHeap()); \
     }
-#endif
+#endif // MMU_IRAM_HEAP
 
 // Controls soft Access Point mode.
 extern bool softAPmode;
@@ -78,7 +83,6 @@ typedef union
 extern motionTriggersUnion motionTriggers;
 
 // Function declarations
-uint64_t millis64();
 extern void load_all_config_settings();
 extern void sync_and_restart();
 extern char *make_rfc952(char *dest, const char *src, int size);

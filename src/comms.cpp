@@ -21,27 +21,30 @@
 #include <Ticker.h>
 
 // RATGDO project includes
-#ifndef USE_GDOLIB
-#include "SoftwareSerial.h"
-#endif
 #include "ratgdo.h"
 #include "homekit.h"
 #include "utilities.h"
-
-#ifndef USE_GDOLIB
-#include "../lib/ratgdo/Packet.h"
-#include "../lib/ratgdo/Reader.h"
-#include "../lib/ratgdo/secplus2.h"
-#else
-#include "gdo.h"
-#endif
-
 #include "comms.h"
 #include "config.h"
 #include "led.h"
-#ifndef USE_GDOLIB
+
+#ifdef ESP32
+#ifdef USE_GDOLIB
+#include "gdo.h"
+#else // not USE_GDOLIB
+#include "SoftwareSerial.h"
+#include "../lib/ratgdo/Packet.h"
+#include "../lib/ratgdo/Reader.h"
+#include "../lib/ratgdo/secplus2.h"
 #include "drycontact.h"
-#endif
+#endif // USE_GDOLIB
+#else  // not ESP32
+#include "SoftwareSerial.h"
+#include "Reader.h"
+#include "secplus2.h"
+#include "Packet.h"
+#include "cQueue.h"
+#endif // ESP32
 
 static const char *TAG = "ratgdo-comms";
 
@@ -49,16 +52,21 @@ static bool comms_setup_done = false;
 
 /********************************** LOCAL STORAGE *****************************************/
 #ifndef USE_GDOLIB
-struct PacketAction
+struct __attribute__((aligned(4))) PacketAction
 {
     Packet pkt;
     bool inc_counter;
     uint32_t delay;
 };
 
+#ifdef ESP32
 QueueHandle_t pkt_q;
+#else
+Queue_t pkt_q;
+#endif // ESP32
 SoftwareSerial sw_serial;
-#endif
+#endif // not USE_GDOLIB
+
 extern struct GarageDoor garage_door;
 extern bool status_done;
 
@@ -106,15 +114,18 @@ std::map<gdo_lock_state_t, LockTargetState> gdo_to_homekit_lock_target_state = {
     {GDO_LOCK_STATE_LOCKED, LockTargetState::TGT_LOCKED},
     {GDO_LOCK_STATE_MAX, (LockTargetState)0xFF},
 };
-#endif
 
-#ifndef USE_GDOLIB
+#else // not USE_GDOLIB
 /******************************* OBSTRUCTION SENSOR *********************************/
+
+// Track if we've detected a working obstruction sensor
+bool obstruction_sensor_detected = false;
 
 struct obstruction_sensor_t
 {
-    unsigned int low_count = 0; // count obstruction low pulses
-    uint64_t last_asleep = 0;   // count time between high pulses from the obst ISR
+    uint32_t low_count = 0; // count obstruction low pulses
+    _millis_t last_asleep = 0; // count time between high pulses from the obst ISR
+    bool pin_ever_changed = false; // track if pin has ever changed from initial stat
 } obstruction_sensor;
 
 void IRAM_ATTR isr_obstruction()
@@ -127,24 +138,24 @@ void IRAM_ATTR isr_obstruction()
 SecPlus2Reader reader;
 uint32_t id_code = 0;
 uint32_t rolling_code = 0;
-#endif
+#endif // USE_GDOLIB
+
 uint32_t last_saved_code = 0;
+static bool rolling_code_operation_in_progress = false;
 #define MAX_CODES_WITHOUT_FLASH_WRITE 10
 
 /******************************* SECURITY 1.0 *********************************/
 #ifndef USE_GDOLIB
 static const uint8_t RX_LENGTH = 2;
 typedef uint8_t RxPacket[RX_LENGTH * 4];
-uint64_t last_rx;
-uint64_t last_tx;
+_millis_t last_rx;
+_millis_t last_tx;
 
 #define MAX_COMMS_RETRY 10
 
 bool wallplateBooting = false;
 bool wallPanelDetected = false;
-// #endif
 GarageDoorCurrentState doorState = GarageDoorCurrentState::UNKNOWN;
-// #ifndef USE_GDOLIB
 uint8_t lightState;
 uint8_t lockState;
 
@@ -172,9 +183,7 @@ enum secplus1Codes : uint8_t
     LightLockStatus = 0x3A,
     Unknown = 0xFF
 };
-#endif
-/*************************** FORWARD DECLARATIONS ******************************/
-#ifndef USE_GDOLIB
+
 void sync();
 bool process_PacketAction(PacketAction &pkt_ac);
 void door_command(DoorAction action);
@@ -183,7 +192,8 @@ void send_get_openings();
 bool transmitSec1(byte toSend);
 bool transmitSec2(PacketAction &pkt_ac);
 void obstruction_timer();
-#endif
+#endif // not USE_GDOLIB
+
 void manual_recovery();
 
 #ifdef USE_GDOLIB
@@ -266,7 +276,7 @@ static void gdo_event_handler(const gdo_status_t *status, gdo_cb_event_t event, 
             ESP_LOGI(TAG, "Detected new Motion Sensor. Enabling Service");
             motionTriggers.bit.motion = 1;
             userConfig->set(cfg_motionTriggers, motionTriggers.asInt);
-            enable_service_homekit_motion();
+            enable_service_homekit_motion(false); // ESP32 with HomeSpan can do this without reboot
         }
         notify_homekit_motion(status->motion == gdo_motion_state_t::GDO_MOTION_STATE_DETECTED);
         if (garage_door.motion)
@@ -333,8 +343,6 @@ static void gdo_event_handler(const gdo_status_t *status, gdo_cb_event_t event, 
  */
 void setup_comms()
 {
-    esp_err_t err = ESP_OK;
-
     if (comms_setup_done)
         return;
 
@@ -343,7 +351,11 @@ void setup_comms()
 
 #ifndef USE_GDOLIB
     // Create packet queue
+#ifdef ESP32
     pkt_q = xQueueCreate(16, sizeof(PacketAction));
+#else
+    q_init(&pkt_q, sizeof(PacketAction), 16, FIFO, false);
+#endif
 
     if (doorControlType == 1)
     {
@@ -365,18 +377,30 @@ void setup_comms()
         sw_serial.enableIntTx(false);
         sw_serial.enableAutoBaud(true); // found in ratgdo/espsoftwareserial branch autobaud
 
-        // read from flash, default of 0 if file not exist
+// read from flash, default of 0 if file not exist
+#ifdef ESP32
         id_code = nvRam->read(nvram_id_code);
+#else
+        id_code = read_int_from_file(nvram_id_code);
+#endif
         if (!id_code)
         {
             ESP_LOGI(TAG, "id code not found");
             id_code = (random(0x1, 0xFFF) << 12) | 0x539;
+#ifdef ESP32
             nvRam->write(nvram_id_code, id_code);
+#else
+            write_int_to_file(nvram_id_code, id_code);
+#endif
         }
         ESP_LOGI(TAG, "id code %lu (0x%02lX)", id_code, id_code);
 
         // read from flash, default of 0 if file not exist
+#ifdef ESP32
         rolling_code = nvRam->read(nvram_rolling, 0);
+#else
+        rolling_code = read_int_from_file(nvram_rolling, 0);
+#endif
         // last saved rolling code may be behind what the GDO thinks, so bump it up so that it will
         // always be ahead of what the GDO thinks it should be, and save it.
         rolling_code = (rolling_code != 0) ? rolling_code + MAX_CODES_WITHOUT_FLASH_WRITE : 0;
@@ -396,7 +420,9 @@ void setup_comms()
         ESP_LOGI(TAG, "=== Setting up comms for dry contact protocol");
         pinMode(UART_TX_PIN, OUTPUT);
     }
-#else
+#else // !USE_GDOLIB
+    esp_err_t err = ESP_OK;
+
     if ((doorControlType == 1) || (doorControlType == 2))
     {
         gdo_config_t gdo_conf = {
@@ -523,6 +549,10 @@ void save_rolling_code()
 {
     if (doorControlType != 2)
         return;
+    // Prevent concurrent rolling code operations
+    if (rolling_code_operation_in_progress)
+        return;
+    rolling_code_operation_in_progress = true;
 
 #ifdef USE_GDOLIB
     if (gdo_status.rolling_code != 0)
@@ -530,10 +560,15 @@ void save_rolling_code()
     ESP_LOGI(TAG, "Save rolling code: %d", gdo_status.rolling_code);
     nvRam->write(nvram_rolling, gdo_status.rolling_code);
     last_saved_code = gdo_status.rolling_code;
-#else
+#else // !USE_GDOLIB
+#ifdef ESP32
     nvRam->write(nvram_rolling, rolling_code);
-    last_saved_code = rolling_code;
+#else
+    write_int_to_file(nvram_rolling, rolling_code);
 #endif
+    last_saved_code = rolling_code;
+#endif // !USE_GDOLIB
+    rolling_code_operation_in_progress = false;
 }
 
 void reset_door()
@@ -543,9 +578,15 @@ void reset_door()
 #else
     rolling_code = 0; // because sync_and_reboot writes this.
 #endif
+#ifdef ESP32
     nvRam->erase(nvram_rolling);
     nvRam->erase(nvram_id_code);
     nvRam->erase(nvram_has_motion);
+#else
+    delete_file(nvram_rolling);
+    delete_file(nvram_id_code);
+    delete_file(nvram_has_motion);
+#endif
 }
 #ifndef USE_GDOLIB
 /****************************************************************************
@@ -557,10 +598,10 @@ void wallPlate_Emulation()
     if (wallPanelDetected)
         return;
 
-    uint64_t currentMillis = millis64();
-    static uint64_t lastRequestMillis = 0;
+    _millis_t currentMillis = _millis();
+    static _millis_t lastRequestMillis = 0;
+    static _millis_t serialDetected = 0;
     static bool emulateWallPanel = false;
-    static uint64_t serialDetected = 0;
     static uint8_t stateIndex = 0;
 
     if (!serialDetected)
@@ -607,7 +648,11 @@ void wallPlate_Emulation()
             data.value.cmd = secplus1ToSend;
             Packet pkt = Packet(PacketCommand::GetStatus, data, id_code);
             PacketAction pkt_ac = {pkt, true, 20}; // 20ms delay for SECURITY1.0 (which is minimum delay)
+#ifdef ESP32
             if (xQueueSendToBack(pkt_q, &pkt_ac, 0) == errQUEUE_FULL)
+#else
+            if (!q_push(&pkt_q, &pkt_ac))
+#endif
             {
                 ESP_LOGE(TAG, "packet queue full, dropping panel emulation status pkt");
             }
@@ -634,8 +679,7 @@ void comms_loop_sec1()
     if (sw_serial.available())
     {
         uint8_t ser_byte = sw_serial.read();
-        last_rx = millis64();
-        // Serial.printf("RX: %lu\n", last_rx);
+        last_rx = _millis();
 
         if (!reading_msg)
         {
@@ -660,8 +704,18 @@ void comms_loop_sec1()
         }
         else
         {
-            // save next byte
-            rx_packet[byte_count++] = ser_byte;
+            // save next byte with bounds checking to prevent overflow
+            if (byte_count < sizeof(rx_packet))
+            {
+                rx_packet[byte_count++] = ser_byte;
+            }
+            else
+            {
+                ESP_LOGE(TAG, "SEC1 RX buffer overflow, discarding packet");
+                reading_msg = false;
+                byte_count = 0;
+                return;
+            }
 
             if (byte_count == RX_LENGTH)
             {
@@ -671,7 +725,7 @@ void comms_loop_sec1()
                 gotMessage = true;
             }
 
-            if (gotMessage == false && (millis64() - last_rx) > 100)
+            if (gotMessage == false && ((_millis() - last_rx) > 100))
             {
                 ESP_LOGI(TAG, "RX message timeout");
                 // if we have a partial packet and it's been over 100ms since last byte was read,
@@ -699,8 +753,6 @@ void comms_loop_sec1()
             manual_recovery();
             if (motionTriggers.bit.doorKey)
             {
-                garage_door.motion_timer = millis64() + MOTION_TIMER_DURATION;
-                // garage_door.motion = true;
                 notify_homekit_motion(true);
             }
         }
@@ -737,7 +789,7 @@ void comms_loop_sec1()
             {
             // door status
             case secplus1Codes::DoorStatus:
-
+            {
                 // ESP_LOGI(TAG, "0x38 MSG: %02X",val);
 
                 // 0x5X = stopped
@@ -758,13 +810,24 @@ void comms_loop_sec1()
                 // 110 0x6 stopped
 
                 // sec+1 doors sometimes report wrong door status
-                // require two sequential matching door states
-                // I have not seen this to be the case on my unit (MJS)
-                static uint8_t prevDoor;
-                if (prevDoor != val)
+                // Use improved validation: accept single state if valid, require confirmation for suspicious values
+                static uint8_t prevDoor = 0xFF; // Initialize to invalid value
+                static uint8_t stateConfirmCount = 0;
+                // Accept valid states immediately, but require confirmation for edge cases
+                bool isValidState = (val <= 0x06 && val != 0x03); // 0x03 is not a known valid state
+                if (prevDoor == val)
+                {
+                    stateConfirmCount++;
+                }
+                else
                 {
                     prevDoor = val;
-                    break;
+                    stateConfirmCount = 1;
+                }
+                // Accept immediately if valid state, or if confirmed twice for edge cases
+                if (!isValidState && stateConfirmCount < 2)
+                {
+                    break; // Wait for confirmation on suspicious values
                 }
 
                 switch (val)
@@ -869,7 +932,6 @@ void comms_loop_sec1()
                         break;
                     }
                     ESP_LOGI(TAG, "status DOOR: %s", l);
-
                     notify_homekit_current_door_state_change(gd_currentstate);
                 }
 
@@ -881,15 +943,16 @@ void comms_loop_sec1()
                 }
 
                 break;
-
+            }
             // obstruction states (not confirmed)
             case secplus1Codes::ObstructionStatus:
+            {
                 // currently not using
                 break;
-
+            }
             // light & lock
             case secplus1Codes::LightLockStatus:
-
+            {
                 // ESP_LOGI(TAG, "0x3A MSG: %X%02X",key,val);
 
                 // upper nibble must be 5
@@ -914,8 +977,6 @@ void comms_loop_sec1()
                     notify_homekit_light((bool)lightState);
                     if (motionTriggers.bit.lightKey)
                     {
-                        garage_door.motion_timer = millis64() + MOTION_TIMER_DURATION;
-                        // garage_door.motion = true;
                         notify_homekit_motion(true);
                     }
                 }
@@ -942,13 +1003,12 @@ void comms_loop_sec1()
                     notify_homekit_current_lock(garage_door.current_lock);
                     if (motionTriggers.bit.lockKey)
                     {
-                        garage_door.motion_timer = millis64() + MOTION_TIMER_DURATION;
-                        // garage_door.motion = true;
                         notify_homekit_motion(true);
                     }
                 }
 
                 break;
+            }
             }
         }
     }
@@ -958,39 +1018,48 @@ void comms_loop_sec1()
     //
     PacketAction pkt_ac;
     static uint32_t cmdDelay = 0;
-    uint64_t now;
-    bool okToSend = false;
+    _millis_t now;
     static uint16_t retryCount = 0;
-
+    bool okToSend = false;
     uint32_t msgs;
+
+#ifdef ESP32
     while ((msgs = uxQueueMessagesWaiting(pkt_q)) > 0)
     {
-        now = millis64();
+        now = _millis();
+#else
+    while ((msgs = (uint32_t)!q_isEmpty(&pkt_q)) > 0)
+    {
+        now = _millis();
+#endif
+
         /*
         // if there is no wall panel, no need to check 200ms since last rx
         // (yes some duped code here, but its clearer)
         if (!wallPanelDetected)
         {
             // no wall panel
-            okToSend = (now - last_rx > 20);        // after 20ms since last rx
-            okToSend &= (now - last_tx > 20);       // after 20ms since last tx
-            okToSend &= (now - last_tx > cmdDelay); // after any command delays
+            okToSend = ((int32_t)(now - last_rx) > 20);        // after 20ms since last rx
+            okToSend &= ((int32_t)(now - last_tx) > 20);       // after 20ms since last tx
+            okToSend &= ((int32_t)(now - last_tx) > (int32_t)cmdDelay); // after any command delays
         }
         else
         {
             // digital wall panel
-            okToSend = (now - last_rx > 20);        // after 20ms since last rx
-            okToSend &= (now - last_rx < 200);      // before 200ms since last rx
-            okToSend &= (now - last_tx > 20);       // after 20ms since last tx
-            okToSend &= (now - last_tx > cmdDelay); // after any command delays
+            okToSend = ((int32_t)(now - last_rx) > 20);        // after 20ms since last rx
+            okToSend &= ((int32_t)(now - last_rx) < 200);      // before 200ms since last rx
+            okToSend &= ((int32_t)(now - last_tx) > 20);       // after 20ms since last tx
+            okToSend &= ((int32_t)(now - last_tx) > (int32_t)cmdDelay); // after any command delays
+
         }
         */
+
         // Replacing above code and specifically removing test for <200ms for last rx when
         // a digital wall panel is detected. I believe this was an attempt to avoid collision
         // on the wire, but it is causing the above test to always return false?
-        okToSend = (now - last_tx > 50)           // wait at least 20ms since last tx
-                   && (now - last_rx > 50)        // and at least 20ms since last rx
-                   && (now - last_tx > cmdDelay); // and any specified delay from last tx
+        okToSend = ((int32_t)(now - last_tx) > 50)                    // wait at least 20ms since last tx
+                   && ((int32_t)(now - last_rx) > 50)                 // and at least 20ms since last rx
+                   && ((int32_t)(now - last_tx) > (int32_t)cmdDelay); // and any specified delay from last tx
 
         // OK to send based on above rules
         if (okToSend)
@@ -1001,12 +1070,19 @@ void comms_loop_sec1()
                 ESP_LOGE(TAG, "WARNING: message packets in queue is > 3 (%lu)", msgs);
             else
                 ESP_LOGD(TAG, "packet ready for tx");
-
+#ifdef ESP32
             xQueueReceive(pkt_q, &pkt_ac, 0); // ignore errors
+#else
+            if (q_peek(&pkt_q, &pkt_ac))
+            {
+#endif
             if (process_PacketAction(pkt_ac))
             {
                 // get next delay "between" transmits
                 cmdDelay = pkt_ac.delay;
+#ifndef ESP32
+                q_drop(&pkt_q);
+#endif
             }
             else
             {
@@ -1014,14 +1090,23 @@ void comms_loop_sec1()
                 if (retryCount++ < MAX_COMMS_RETRY)
                 {
                     ESP_LOGE(TAG, "transmit failed, will retry");
+#ifdef ESP32
                     xQueueSendToFront(pkt_q, &pkt_ac, 0); // ignore errors
+#endif
                 }
                 else
                 {
                     ESP_LOGE(TAG, "transmit failed, exceeded max retry, aborting");
                     retryCount = 0;
+#ifndef ESP32
+                    q_drop(&pkt_q);
+#endif
                 }
             }
+#ifdef ESP32
+#else
+            }
+#endif
         }
         // If we are looping over multiple packets, yield on each loop
         if (msgs > 1)
@@ -1044,7 +1129,11 @@ void comms_loop_sec2()
     {
         PacketAction pkt_ac;
         uint32_t msgs;
+#ifdef ESP32
         while ((msgs = uxQueueMessagesWaiting(pkt_q)) > 0)
+#else
+        while ((msgs = (uint32_t)q_peek(&pkt_q, &pkt_ac)) > 0)
+#endif
         {
             // Two packets in the queue is normal (e.g. set light followed by get status)
             // but more than that may indicate a problem
@@ -1053,21 +1142,34 @@ void comms_loop_sec2()
             else
                 ESP_LOGD(TAG, "packet ready for tx");
 
+#ifdef ESP32
             xQueueReceive(pkt_q, &pkt_ac, 0); // ignore errors
+#endif
             if (!process_PacketAction(pkt_ac))
             {
 
                 if (retryCount++ < MAX_COMMS_RETRY)
                 {
                     ESP_LOGE(TAG, "transmit failed, will retry");
+#ifdef ESP32
                     xQueueSendToFront(pkt_q, &pkt_ac, 0); // ignore errors
+#endif
                 }
                 else
                 {
                     ESP_LOGE(TAG, "transmit failed, exceeded max retry, aborting");
                     retryCount = 0;
+#ifndef ESP32
+                    q_drop(&pkt_q);
+#endif
                 }
             }
+#ifndef ESP32
+            else
+            {
+                q_drop(&pkt_q);
+            }
+#endif
             // If we are looping over multiple packets, yield on each loop
             if (msgs > 1)
                 yield();
@@ -1181,6 +1283,26 @@ void comms_loop_sec2()
                     notify_homekit_current_lock(current_lock);
                 }
 
+                // Handle obstruction from status packet if pin-based detection not available
+                if (!obstruction_sensor_detected)
+                {
+                    // Status packet obstruction field is inverted: 1=clear, 0=obstructed
+                    bool status_obstructed = !pkt.m_data.value.status.obstruction;
+                    if (garage_door.obstructed != status_obstructed)
+                    {
+                        garage_door.obstructed = status_obstructed;
+                        ESP_LOGI(TAG, "Obstruction %s (Status packet)", status_obstructed ? "Detected" : "Clear");
+                        notify_homekit_obstruction(true);
+                        digitalWrite(STATUS_OBST_PIN, garage_door.obstructed);
+
+                        if (motionTriggers.bit.obstruction)
+                        {
+                            garage_door.motion = garage_door.obstructed;
+                            notify_homekit_motion(true);
+                        }
+                    }
+                }
+
                 status_done = true;
                 break;
             }
@@ -1214,7 +1336,6 @@ void comms_loop_sec2()
                     notify_homekit_target_lock(lock);
                     if (motionTriggers.bit.lockKey)
                     {
-                        garage_door.motion_timer = millis64() + MOTION_TIMER_DURATION;
                         // garage_door.motion = true;
                         notify_homekit_motion(true);
                     }
@@ -1248,8 +1369,6 @@ void comms_loop_sec2()
                     notify_homekit_light(l);
                     if (motionTriggers.bit.lightKey)
                     {
-                        garage_door.motion_timer = millis64() + MOTION_TIMER_DURATION;
-                        // garage_door.motion = true;
                         notify_homekit_motion(true);
                     }
                 }
@@ -1271,16 +1390,17 @@ void comms_loop_sec2()
                     garage_door.has_motion_sensor = true;
                     motionTriggers.bit.motion = 1;
                     userConfig->set(cfg_motionTriggers, motionTriggers.asInt);
-                    enable_service_homekit_motion();
+                    ESP8266_SAVE_CONFIG();
+#ifdef ESP32
+                    enable_service_homekit_motion(false); // ESP32 with HomeSpan can do this without reboot
+#else
+                    enable_service_homekit_motion(true);
+#endif
                 }
 
-                /* When we get the motion detect message, notify HomeKit. Motion sensor
-                    will continue to send motion messages every 5s until motion stops.
-                    set a timer for 5 seconds to disable motion after the last message */
-                garage_door.motion_timer = millis64() + MOTION_TIMER_DURATION;
+                // When we get the motion detect message, notify HomeKit. Motion sensor
                 if (!garage_door.motion)
                 {
-                    // garage_door.motion = true;
                     notify_homekit_motion(true);
                 }
                 // Update status because things like light may have changed states
@@ -1297,8 +1417,6 @@ void comms_loop_sec2()
                 }
                 if (pkt.m_data.value.door_action.pressed && motionTriggers.bit.doorKey)
                 {
-                    garage_door.motion_timer = millis64() + MOTION_TIMER_DURATION;
-                    // garage_door.motion = true;
                     notify_homekit_motion(true);
                 }
                 break;
@@ -1327,6 +1445,37 @@ void comms_loop_sec2()
                 // Silently ignore, because we see lots of these and they have no data, and Packet.h logged them.
                 break;
             }
+            case PacketCommand::Pair3Resp:
+            {
+                // Only use Pair3Resp for obstruction detection if no sensor detected
+                if (!obstruction_sensor_detected)
+                {
+                    // Use Pair3Resp packets for obstruction detection via parity
+                    // Parity 3 = clear, Parity 4 = obstructed
+                    uint8_t parity = pkt.m_data.value.no_data.parity;
+                    bool currently_obstructed = (parity == 4);
+
+                    // Only update if obstruction state has changed
+                    if (garage_door.obstructed != currently_obstructed)
+                    {
+                        garage_door.obstructed = currently_obstructed;
+                        ESP_LOGI(TAG, "Obstruction %s (Pair3Resp parity %d)",
+                                 currently_obstructed ? "Detected" : "Clear", parity);
+
+                        // Notify HomeKit of the state change
+                        notify_homekit_obstruction(true);
+                        digitalWrite(STATUS_OBST_PIN, garage_door.obstructed);
+
+                        // Trigger motion detection if enabled
+                        if (motionTriggers.bit.obstruction)
+                        {
+                            garage_door.motion = garage_door.obstructed;
+                            notify_homekit_motion(true);
+                        }
+                    }
+                }
+                break;
+            }
 
             default:
                 // Log if we get a command that we do not recognize.
@@ -1336,8 +1485,9 @@ void comms_loop_sec2()
         }
     }
 
-    // Save rolling code if we have exceeded max limit.
-    if (rolling_code >= (last_saved_code + MAX_CODES_WITHOUT_FLASH_WRITE))
+    // Only check if no rolling code operation is in progress to prevent race conditions
+    if (!rolling_code_operation_in_progress && rolling_code >= (last_saved_code + MAX_CODES_WITHOUT_FLASH_WRITE))
+
     {
         save_rolling_code();
     }
@@ -1390,14 +1540,14 @@ void comms_loop()
 
 #ifdef USE_GDOLIB
     // Room Occupancy Clear Timer
-    if (garage_door.room_occupied && (millis64() > garage_door.room_occupancy_timeout))
+    if (garage_door.room_occupied && (_millis() > garage_door.room_occupancy_timeout))
     {
         notify_homekit_room_occupancy(false);
         ESP_LOGI(TAG, "Room occupancy cleared after %d minutes", userConfig->getOccupancyDuration() / 60);
     }
 
     // Motion Clear Timer
-    if (garage_door.motion && (millis64() > garage_door.motion_timer))
+    if (garage_door.motion && (_millis() > garage_door.motion_timer))
     {
         notify_homekit_motion(false);
         ESP_LOGI(TAG, "Motion Cleared after %d seconds", MOTION_TIMER_DURATION / 1000);
@@ -1411,7 +1561,7 @@ void comms_loop()
         comms_loop_drycontact();
 
     // Motion Clear Timer
-    if (garage_door.motion && (millis64() > garage_door.motion_timer))
+    if (garage_door.motion && garage_door.motion_timer > 0 && ((_millis() - garage_door.motion_timer) >= 0)
     {
         ESP_LOGI(TAG, "Motion Cleared");
         // garage_door.motion = false;
@@ -1447,8 +1597,7 @@ bool transmitSec1(byte toSend)
     }
 
     sw_serial.write(toSend);
-    last_tx = millis64();
-    // Serial.printf("TX: %lu\n", last_tx);
+    last_tx = _millis();
 
     // re-enable rx
     if (!poll_cmd)
@@ -1495,7 +1644,11 @@ bool transmitSec2(PacketAction &pkt_ac)
 
         if (pkt_ac.inc_counter)
         {
-            rolling_code = (rolling_code + 1) & 0xfffffff;
+            // Protect rolling code increment from concurrent access
+            if (!rolling_code_operation_in_progress)
+            {
+                rolling_code = (rolling_code + 1) & 0xfffffff;
+            }
         }
     }
 
@@ -1630,8 +1783,11 @@ void door_command(DoorAction action)
 
         Packet pkt = Packet(PacketCommand::DoorAction, data, id_code);
         PacketAction pkt_ac = {pkt, false, 250}; // 250ms delay for SECURITY1.0
-
+#ifdef ESP32
         if (xQueueSendToBack(pkt_q, &pkt_ac, 0) == errQUEUE_FULL)
+#else
+        if (!q_push(&pkt_q, &pkt_ac))
+#endif
         {
             ESP_LOGE(TAG, "packet queue full, dropping door command pressed pkt");
         }
@@ -1640,15 +1796,22 @@ void door_command(DoorAction action)
         pkt_ac.pkt.m_data.value.door_action.pressed = false;
         pkt_ac.inc_counter = true;
         pkt_ac.delay = 40; // 40ms delay for SECURITY1.0
-
+#ifdef ESP32
         if (xQueueSendToBack(pkt_q, &pkt_ac, 0) == errQUEUE_FULL)
+#else
+        if (!q_push(&pkt_q, &pkt_ac))
+#endif
         {
             ESP_LOGE(TAG, "packet queue full, dropping door command release pkt");
         }
         // when observing wall panel 2 releases happen, so we do the same
         if (doorControlType == 1)
         {
+#ifdef ESP32
             if (xQueueSendToBack(pkt_q, &pkt_ac, 0) == errQUEUE_FULL)
+#else
+            if (!q_push(&pkt_q, &pkt_ac))
+#endif
             {
                 ESP_LOGE(TAG, "packet queue full, dropping door command release pkt");
             }
@@ -1754,7 +1917,9 @@ void delayFnCall(uint32_t ms, void (*callback)())
                                     set_light((iterations % 4) != 0, false);
                                 }
                             }
+#ifdef ESP32
                             tone(BEEPER_PIN, 1300, 125);
+#endif
                             iterations--;
                         }
                         else
@@ -1843,7 +2008,11 @@ void send_get_status()
         d.value.no_data = NoData();
         Packet pkt = Packet(PacketCommand::GetStatus, d, id_code);
         PacketAction pkt_ac = {pkt, true};
+#ifdef ESP32
         if (xQueueSendToBack(pkt_q, &pkt_ac, 0) == errQUEUE_FULL)
+#else
+        if (!q_push(&pkt_q, &pkt_ac))
+#endif
         {
             ESP_LOGE(TAG, "packet queue full, dropping get status pkt");
         }
@@ -1860,7 +2029,11 @@ void send_get_openings()
         d.value.no_data = NoData();
         Packet pkt = Packet(PacketCommand::GetOpenings, d, id_code);
         PacketAction pkt_ac = {pkt, true};
+#ifdef ESP32
         if (xQueueSendToBack(pkt_q, &pkt_ac, 0) == errQUEUE_FULL)
+#else
+        if (!q_push(&pkt_q, &pkt_ac))
+#endif
         {
             ESP_LOGE(TAG, "packet queue full, dropping get status pkt");
         }
@@ -1886,7 +2059,7 @@ bool set_lock(bool value, bool verify)
         gdo_unlock();
     return true;
 }
-#else
+#else // USE_GDOLIB
 bool set_lock(bool value, bool verify)
 {
     // return value: true = lock state changed, else state unchanged
@@ -1917,7 +2090,11 @@ bool set_lock(bool value, bool verify)
         Packet pkt = Packet(PacketCommand::Lock, data, id_code);
         PacketAction pkt_ac = {pkt, true, 3000}; // 3000ms delay for SECURITY1.0
 
+#ifdef ESP32
         if (xQueueSendToBack(pkt_q, &pkt_ac, 0) == errQUEUE_FULL)
+#else
+        if (!q_push(&pkt_q, &pkt_ac))
+#endif
         {
             ESP_LOGE(TAG, "packet queue full, dropping lock pkt");
         }
@@ -1925,11 +2102,19 @@ bool set_lock(bool value, bool verify)
         pkt_ac.pkt.m_data.value.lock.pressed = false;
         pkt_ac.delay = 40; // 40ms delay for SECURITY1.0
                            // observed the wall plate does 2 releases, so we will too
+#ifdef ESP32
         if (xQueueSendToBack(pkt_q, &pkt_ac, 0) == errQUEUE_FULL)
+#else
+        if (!q_push(&pkt_q, &pkt_ac))
+#endif
         {
             ESP_LOGE(TAG, "packet queue full, dropping lock pkt");
         }
+#ifdef ESP32
         if (xQueueSendToBack(pkt_q, &pkt_ac, 0) == errQUEUE_FULL)
+#else
+        if (!q_push(&pkt_q, &pkt_ac))
+#endif
         {
             ESP_LOGE(TAG, "packet queue full, dropping lock pkt");
         }
@@ -1940,7 +2125,11 @@ bool set_lock(bool value, bool verify)
         Packet pkt = Packet(PacketCommand::Lock, data, id_code);
         PacketAction pkt_ac = {pkt, true};
 
+#ifdef ESP32
         if (xQueueSendToBack(pkt_q, &pkt_ac, 0) == errQUEUE_FULL)
+#else
+        if (!q_push(&pkt_q, &pkt_ac))
+#endif
         {
             ESP_LOGE(TAG, "packet queue full, dropping lock pkt");
         }
@@ -1989,7 +2178,11 @@ bool set_light(bool value, bool verify)
         Packet pkt = Packet(PacketCommand::Light, data, id_code);
         PacketAction pkt_ac = {pkt, true, 250}; // 250ms delay for SECURITY1.0
 
+#ifdef ESP32
         if (xQueueSendToBack(pkt_q, &pkt_ac, 0) == errQUEUE_FULL)
+#else
+        if (!q_push(&pkt_q, &pkt_ac))
+#endif
         {
             ESP_LOGE(TAG, "packet queue full, dropping light pkt");
         }
@@ -1997,11 +2190,19 @@ bool set_light(bool value, bool verify)
         pkt_ac.pkt.m_data.value.light.pressed = false;
         pkt_ac.delay = 40; // 40ms delay for SECURITY1.0
                            // observed the wall plate does 2 releases, so we will too
+#ifdef ESP32
         if (xQueueSendToBack(pkt_q, &pkt_ac, 0) == errQUEUE_FULL)
+#else
+        if (!q_push(&pkt_q, &pkt_ac))
+#endif
         {
             ESP_LOGE(TAG, "packet queue full, dropping light pkt");
         }
+#ifdef ESP32
         if (xQueueSendToBack(pkt_q, &pkt_ac, 0) == errQUEUE_FULL)
+#else
+        if (!q_push(&pkt_q, &pkt_ac))
+#endif
         {
             ESP_LOGE(TAG, "packet queue full, dropping light pkt");
         }
@@ -2012,7 +2213,11 @@ bool set_light(bool value, bool verify)
         Packet pkt = Packet(PacketCommand::Light, data, id_code);
         PacketAction pkt_ac = {pkt, true};
 
+#ifdef ESP32
         if (xQueueSendToBack(pkt_q, &pkt_ac, 0) == errQUEUE_FULL)
+#else
+        if (!q_push(&pkt_q, &pkt_ac))
+#endif
         {
             ESP_LOGE(TAG, "packet queue full, dropping light pkt");
         }
@@ -2032,9 +2237,9 @@ void manual_recovery()
     if (force_recover.push_count++ == 0)
     {
         ESP_LOGI(TAG, "Push count start");
-        force_recover.timeout = millis64() + 3000;
+        force_recover.timeout = _millis() + 3000;
     }
-    else if (millis64() > force_recover.timeout)
+    else if (_millis() > force_recover.timeout)
     {
         ESP_LOGI(TAG, "Push count reset");
         force_recover.push_count = 0;
@@ -2045,6 +2250,7 @@ void manual_recovery()
     {
         ESP_LOGI(TAG, "Request to boot into soft access point mode in %d seconds", force_recover_delay);
         userConfig->set(cfg_softAPmode, true);
+        ESP8266_SAVE_CONFIG();
         delayFnCall(force_recover_delay * 1000, sync_and_restart);
     }
 }
@@ -2055,8 +2261,8 @@ void manual_recovery()
  */
 void obstruction_timer()
 {
-    uint64_t current_millis = millis64();
-    static uint64_t last_millis = 0;
+    _millis_t current_millis = _millis();
+    static _millis_t last_millis = 0;
 
     // the obstruction sensor has 3 states: clear (HIGH with LOW pulse every 7ms), obstructed (HIGH), asleep (LOW)
     // the transitions between awake and asleep are tricky because the voltage drops slowly when falling asleep
@@ -2064,50 +2270,68 @@ void obstruction_timer()
 
     // If at least 3 low pulses are counted within 50ms, the door is awake, not obstructed and we don't have to check anything else
 
-    const long CHECK_PERIOD = 50;
-    const long PULSES_LOWER_LIMIT = 3;
-    if (current_millis - last_millis > CHECK_PERIOD)
+    const uint32_t CHECK_PERIOD = 50;
+    const uint32_t PULSES_LOWER_LIMIT = 3;
+    if ((uint32_t)(current_millis - last_millis) > CHECK_PERIOD)
     {
+        // Atomically read and reset the pulse count to prevent race with ISR
+        noInterrupts();
+        uint32_t pulse_count = obstruction_sensor.low_count;
+        obstruction_sensor.low_count = 0;
+        interrupts();
+
         // check to see if we got more then PULSES_LOWER_LIMIT pulses
-        if (obstruction_sensor.low_count > PULSES_LOWER_LIMIT)
+        if (pulse_count > PULSES_LOWER_LIMIT)
         {
+            // We're getting pulses, so pin detection is working
+            obstruction_sensor.pin_ever_changed = true;
+            if (!obstruction_sensor_detected)
+            {
+                obstruction_sensor_detected = true;
+                ESP_LOGI(TAG, "Pin-based obstruction detection active");
+            }
+
             // Only update if we are changing state
             if (garage_door.obstructed)
             {
                 ESP_LOGI(TAG, "Obstruction Clear");
-                // garage_door.obstructed = false;
                 notify_homekit_obstruction(false);
                 digitalWrite(STATUS_OBST_PIN, garage_door.obstructed);
                 if (motionTriggers.bit.obstruction)
                 {
-                    // garage_door.motion = false;
                     notify_homekit_motion(false);
                 }
             }
         }
-        else if (obstruction_sensor.low_count == 0)
+        else if (pulse_count == 0)
         {
             // if there have been no pulses the line is steady high or low
             if (!digitalRead(INPUT_OBST_PIN))
             {
-                // asleep
+                // asleep - pin went LOW, so it's not stuck HIGH
                 obstruction_sensor.last_asleep = current_millis;
+                obstruction_sensor.pin_ever_changed = true;
             }
             else
             {
                 // if the line is high and was last asleep more than 700ms ago, then there is an obstruction present
-                if (current_millis - obstruction_sensor.last_asleep > 700)
+                if ((uint32_t)(current_millis - obstruction_sensor.last_asleep) > 700)
                 {
+                    // Don't trust a HIGH pin that has never changed - likely floating/stuck
+                    if (!obstruction_sensor.pin_ever_changed)
+                    {
+                        // Pin has been HIGH since boot, probably no sensor connected
+                        return;
+                    }
+
                     // Only update if we are changing state
                     if (!garage_door.obstructed)
                     {
                         ESP_LOGI(TAG, "Obstruction Detected");
-                        // garage_door.obstructed = true;
                         notify_homekit_obstruction(true);
                         digitalWrite(STATUS_OBST_PIN, garage_door.obstructed);
                         if (motionTriggers.bit.obstruction)
                         {
-                            // garage_door.motion = true;
                             notify_homekit_motion(true);
                         }
                     }
@@ -2116,7 +2340,6 @@ void obstruction_timer()
         }
 
         last_millis = current_millis;
-        obstruction_sensor.low_count = 0;
     }
 }
-#endif
+#endif // !USE_GDOLIB

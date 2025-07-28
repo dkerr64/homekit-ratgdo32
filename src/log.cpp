@@ -43,6 +43,7 @@ bool suppressSerialLog = false;
 
 // There is 8KB of RTC memory that can be set to not initialize on restart.
 // Data saved here will survive a crash and restart, but will not survive a power interruption.
+int i = sizeof(logBuffer);
 RTC_NOINIT_ATTR logBuffer rtcRebootLog;
 RTC_NOINIT_ATTR logBuffer rtcCrashLog;
 RTC_NOINIT_ATTR time_t rebootTime;
@@ -50,6 +51,7 @@ RTC_NOINIT_ATTR time_t crashTime;
 RTC_NOINIT_ATTR int16_t crashCount;
 RTC_NOINIT_ATTR char reasonString[64];
 RTC_NOINIT_ATTR char crashVersion[16];
+const int rtcSize = sizeof(rtcRebootLog) + sizeof(rtcCrashLog) + sizeof(rebootTime) + sizeof(crashTime) + sizeof(crashCount) + sizeof(reasonString) + sizeof(crashVersion);
 
 void panic_handler(arduino_panic_info_t *info, void *arg)
 {
@@ -208,7 +210,7 @@ void LOG::printMessageLog(Print &outputDev)
     {
         outputDev.printf("Server time: %s\n", timeString());
     }
-    outputDev.printf("Server uptime (secs): %lu.%03u\n", (uint32_t)(millis64() / 1000LL), (uint16_t)(millis64() % 1000LL));
+    outputDev.printf("Server uptime (secs): %lu.%03u\n", (uint32_t)(_millis() / 1000LL), (uint16_t)(_millis() % 1000LL));
     outputDev.printf("Firmware version: %s\n", AUTO_VERSION);
     outputDev.printf("Free heap: %lu\n", free_heap);
     outputDev.printf("Minimum heap: %lu\n\n", min_heap);

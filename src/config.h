@@ -1,5 +1,5 @@
 /****************************************************************************
- * RATGDO HomeKit for ESP32
+ * RATGDO HomeKit
  * https://ratcloud.llc
  * https://github.com/PaulWieland/ratgdo
  *
@@ -23,23 +23,34 @@
 #include <Print.h>
 
 // ESP system includes
+#ifndef ESP8266
 #include <nvs.h>
+#endif
 
 // RATGDO project includes
 // none
 
 // Globals, for easy access...
-#define DEVICE_NAME_SIZE 32
+
+#ifdef ESP8266
+#define WIFI_POWER_MAX 20
+#else
 // TODO support WiFi TX Power... adjust max value if necessary (on ESP32 const are defined)
 #define WIFI_POWER_MAX 20
+#endif
 
-extern char default_device_name[DEVICE_NAME_SIZE];
+#ifndef ESP8266
+// on ESP8266 these are defined in homekit_decl.h
+#define DEVICE_NAME_SIZE 32
 extern char device_name[DEVICE_NAME_SIZE];
 extern char device_name_rfc952[DEVICE_NAME_SIZE];
+#endif
+extern char default_device_name[DEVICE_NAME_SIZE];
 
 // Define all the user setting keys as consts so we don't repeat strings
 // throughout the code... and compiler will pick up any typos for us.
 // const char cfg_deviceName[] = "deviceName";
+// On ESP32 these are saved to NVRAM, on ESP8266 we will save to a file.
 // NOTE... truncated to 15 chars when saving to NVRAM !!!
 constexpr char cfg_deviceName[] = "deviceName";
 constexpr char cfg_wifiChanged[] = "wifiChanged";
@@ -56,7 +67,6 @@ constexpr char cfg_wwwCredentials[] = "wwwCredentials";
 constexpr char cfg_GDOSecurityType[] = "GDOSecurityType";
 constexpr char cfg_TTCseconds[] = "TTCseconds";
 constexpr char cfg_TTClight[] = "TTClight";
-constexpr char cfg_builtInTTC[] = "builtInTTC";
 constexpr char cfg_rebootSeconds[] = "rebootSeconds";
 constexpr char cfg_LEDidle[] = "LEDidle";
 constexpr char cfg_motionTriggers[] = "motionTriggers";
@@ -67,26 +77,34 @@ constexpr char cfg_softAPmode[] = "softAPmode";
 constexpr char cfg_syslogEn[] = "syslogEn";
 constexpr char cfg_syslogIP[] = "syslogIP";
 constexpr char cfg_syslogPort[] = "syslogPort";
-constexpr char cfg_vehicleThreshold[] = "vehicleThreshold";
-constexpr char cfg_vehicleHomeKit[] = "vehicleHomeKit";
-constexpr char cfg_laserEnabled[] = "laserEnabled";
-constexpr char cfg_laserHomeKit[] = "laserHomeKit";
-constexpr char cfg_assistDuration[] = "assistDuration";
 constexpr char cfg_logLevel[] = "logLevel";
 constexpr char cfg_dcOpenClose[] = "dcOpenClose";
 constexpr char cfg_dcDebounceDuration[] = "dcDebounceDuration";
 constexpr char cfg_useSWserial[] = "useSWserial";
 constexpr char cfg_obstFromStatus[] = "obstFromStatus";
+constexpr char cfg_useToggleToClose[] = "useToggleToClose";
+#ifdef ESP8266
+// On ESP8266 we save user config to a file in LittleFS
+constexpr char cfg_configFile[] = "user_config";
+#else
+constexpr char cfg_builtInTTC[] = "builtInTTC";
+constexpr char cfg_vehicleThreshold[] = "vehicleThreshold";
+constexpr char cfg_vehicleHomeKit[] = "vehicleHomeKit";
+constexpr char cfg_laserEnabled[] = "laserEnabled";
+constexpr char cfg_laserHomeKit[] = "laserHomeKit";
+constexpr char cfg_assistDuration[] = "assistDuration";
 constexpr char cfg_occupancyDuration[] = "occupancyDuration";
 constexpr char cfg_enableIPv6[] = "enableIPv6";
-constexpr char cfg_useToggleToClose[] = "useToggleToClose";
+#endif
 
-constexpr char nvram_messageLog[] = "messageLog";
 constexpr char nvram_id_code[] = "id_code";
 constexpr char nvram_rolling[] = "rolling";
 constexpr char nvram_has_motion[] = "has_motion";
+#ifndef ESP8266
 constexpr char nvram_ratgdo_pw[] = "ratgdo_pw";
+constexpr char nvram_messageLog[] = "messageLog";
 constexpr char nvram_has_distance[] = "has_distance";
+#endif
 
 struct configSetting
 {
@@ -100,11 +118,12 @@ class userSettings
 {
 private:
     std::map<std::string, configSetting> settings;
-    std::string configFile;
     static userSettings *instancePtr;
     userSettings();
     void toFile(Print &file);
+#ifndef ESP8266
     SemaphoreHandle_t mutex;
+#endif
 
 public:
     userSettings(const userSettings &obj) = delete;
@@ -120,6 +139,14 @@ public:
     void toStdOut();
     void save();
     void load();
+#ifdef ESP8266
+    void erase();
+    // on ESP32 every "set" saves the value to NVRAM
+    // on ESP8266 we must call save() to save all user config values into a file.
+#define ESP8266_SAVE_CONFIG() userConfig->save()
+#else
+#define ESP8266_SAVE_CONFIG()
+#endif
 
     std::string getDeviceName() { return std::get<std::string>(get(cfg_deviceName)); };
     bool getWifiChanged() { return std::get<bool>(get(cfg_wifiChanged)); };
@@ -135,7 +162,6 @@ public:
     std::string getwwwCredentials() { return std::get<std::string>(get(cfg_wwwCredentials)); };
     int getGDOSecurityType() { return std::get<int>(get(cfg_GDOSecurityType)); };
     int getTTCseconds() { return std::get<int>(get(cfg_TTCseconds)); };
-    bool getBuiltInTTC() { return std::get<bool>(get(cfg_builtInTTC)); };
     bool getTTClight() { return std::get<bool>(get(cfg_TTClight)); };
     int getRebootSeconds() { return std::get<int>(get(cfg_rebootSeconds)); };
     int getLEDidle() { return std::get<int>(get(cfg_LEDidle)); };
@@ -147,22 +173,31 @@ public:
     bool getSyslogEn() { return std::get<bool>(get(cfg_syslogEn)); };
     std::string getSyslogIP() { return std::get<std::string>(get(cfg_syslogIP)); };
     int getSyslogPort() { return std::get<int>(get(cfg_syslogPort)); };
+    int getLogLevel() { return std::get<int>(get(cfg_logLevel)); };
+    bool getDCOpenClose() { return std::get<bool>(get(cfg_dcOpenClose)); };
+    int getDCDebounceDuration() { return std::get<int>(get(cfg_dcDebounceDuration)); };
+    bool getObstFromStatus() { return std::get<bool>(get(cfg_obstFromStatus)); };
+    bool getUseToggleToClose() { return std::get<bool>(get(cfg_useToggleToClose)); };
+#ifndef ESP8266
+    bool getBuiltInTTC() { return std::get<bool>(get(cfg_builtInTTC)); };
     int getVehicleThreshold() { return std::get<int>(get(cfg_vehicleThreshold)); };
     bool getLaserEnabled() { return std::get<bool>(get(cfg_laserEnabled)); };
     bool getLaserHomeKit() { return std::get<bool>(get(cfg_laserHomeKit)); };
     bool getVehicleHomeKit() { return std::get<bool>(get(cfg_vehicleHomeKit)); };
     int getAssistDuration() { return std::get<int>(get(cfg_assistDuration)); };
-    int getLogLevel() { return std::get<int>(get(cfg_logLevel)); };
-    bool getDCOpenClose() { return std::get<bool>(get(cfg_dcOpenClose)); };
-    int getDCDebounceDuration() { return std::get<int>(get(cfg_dcDebounceDuration)); };
     bool getUseSWserial() { return std::get<bool>(get(cfg_useSWserial)); };
-    bool getObstFromStatus() { return std::get<bool>(get(cfg_obstFromStatus)); };
     int getOccupancyDuration() { return std::get<int>(get(cfg_occupancyDuration)); };
     bool getEnableIPv6() { return std::get<bool>(get(cfg_enableIPv6)); };
-    bool getUseToggleToClose() { return std::get<bool>(get(cfg_useToggleToClose)); };
+#endif
 };
 extern userSettings *userConfig;
 
+#ifdef ESP8266
+// No NVRAM on ESP8266 so just use simple read/write from files
+uint32_t read_int_from_file(const char *filename, uint32_t defaultValue = 0);
+void write_int_to_file(const char *filename, uint32_t value);
+void delete_file(const char *filename);
+#else
 class nvRamClass
 {
 private:
@@ -188,5 +223,5 @@ public:
     bool erase(const std::string &constKey);
     void erase();
 };
-
 extern nvRamClass *nvRam;
+#endif
