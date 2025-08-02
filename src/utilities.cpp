@@ -247,7 +247,7 @@ void sync_and_restart()
     WiFi.forceSleepBegin();
     // Save current logs in case needed for future analysis
     File file = LittleFS.open(REBOOT_LOG_MSG_FILE, "w");
-    printMessageLog(file);
+    ratgdoLogger->printMessageLog(file);
     file.close();
     LittleFS.end();
 #else

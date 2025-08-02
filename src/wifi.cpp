@@ -42,7 +42,7 @@
 static const char *TAG = "ratgdo-wifi";
 
 // support for changeing WiFi settings
-unsigned long wifiConnectStart = 0;
+_millis_t wifiConnectStart = 0;
 bool wifiConnectActive = false;
 station_config wifiConf;
 
@@ -175,7 +175,7 @@ void wifi_connect()
         ESP_LOGI(TAG, "Connecting to SSID: %s", wifiConf.ssid);
     }
     ESP_LOGI(TAG, "Starting WiFi connecting in background");
-    wifiConnectStart = millis();
+    wifiConnectStart = _millis();
     wifiConnectActive = true;
     WiFi.begin(); // use credentials stored in flash
     IRAM_END("Wifi initialized");
@@ -184,24 +184,24 @@ void wifi_connect()
 void wifi_loop()
 {
 #ifdef GW_PING_CHECK
-    static unsigned long gw_ping_start = 0;
-    static unsigned long gw_report_start = 0;
+    static _millis_t gw_ping_start = 0;
+    static _millis_t gw_report_start = 0;
     static bool gw_ping_init = false;
     static bool gw_report_init = false;
 
     if (!gw_ping_init)
     {
-        gw_ping_start = millis();
+        gw_ping_start = _millis();
         gw_ping_init = true;
     }
     if (!gw_report_init)
     {
-        gw_report_start = millis();
+        gw_report_start = _millis();
         gw_report_init = true;
     }
 
     // Once a minute ping the Gateway and log
-    unsigned long now = millis();
+    _millis_t now = _millis();
     if (now - gw_ping_start >= 60000)
     {
         gw_ping_start = now;
@@ -221,17 +221,17 @@ void wifi_loop()
         }
     }
 #endif
-    static unsigned long soft_ap_start = 0;
+    static _millis_t soft_ap_start = 0;
     static bool soft_ap_timer_started = false;
 
     if (softAPmode)
     {
         if (!soft_ap_timer_started)
         {
-            soft_ap_start = millis();
+            soft_ap_start = _millis();
             soft_ap_timer_started = true;
         }
-        if (millis() - soft_ap_start > 10 * 60 * 1000)
+        if (_millis() - soft_ap_start > 10 * 60 * 1000)
         {
             ESP_LOGI(TAG, "In Soft Access Point mode for over 10 minutes, reboot");
             sync_and_restart();
@@ -239,7 +239,7 @@ void wifi_loop()
         }
     }
 
-    if (userConfig->getWifiChanged() && wifiConnectActive && (millis() - wifiConnectStart >= 30000))
+    if (userConfig->getWifiChanged() && wifiConnectActive && (_millis() - wifiConnectStart >= 30000))
     {
         bool connected = (WiFi.status() == WL_CONNECTED);
         ESP_LOGI(TAG, "30 seconds since WiFi settings change, connected to access point: %s", (connected) ? "true" : "false");
@@ -253,7 +253,7 @@ void wifi_loop()
             WiFi.setPhyMode((WiFiPhyMode_t)0);
             ESP8266_SAVE_CONFIG();
             // Now try and reconnect...
-            wifiConnectStart = millis();
+            wifiConnectStart = _millis();
             wifiConnectActive = true;
             WiFi.reconnect();
             return;
@@ -271,7 +271,7 @@ void wifi_loop()
                 ip.fromString("0.0.0.0");
                 WiFi.config(ip, ip, ip);
                 // Now try and reconnect...
-                wifiConnectStart = millis();
+                wifiConnectStart = _millis();
                 wifiConnectActive = true;
                 WiFi.reconnect();
                 return;

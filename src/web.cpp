@@ -1273,7 +1273,7 @@ void handle_crashlog()
 #ifdef ESP8266
     saveCrash.print(client);
     if (crashCount > 0)
-        printSavedLog(client);
+        ratgdoLogger->printSavedLog(client);
 #else
     ratgdoLogger->printCrashLog(client);
 #endif
@@ -1284,11 +1284,7 @@ void handle_showlog()
 {
     WiFiClient client = server.client();
     client.print(response200);
-#ifdef ESP8266
-    printMessageLog(client);
-#else
     ratgdoLogger->printMessageLog(client);
-#endif
     client.stop();
 }
 
@@ -1298,7 +1294,7 @@ void handle_showrebootlog()
     client.print(response200);
 #ifdef ESP8266
     File file = LittleFS.open(REBOOT_LOG_MSG_FILE, "r");
-    printSavedLog(file, client);
+    ratgdoLogger->printSavedLog(file, client);
     file.close();
 #else
     ratgdoLogger->printSavedLog(client);

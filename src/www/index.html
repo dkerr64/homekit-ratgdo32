@@ -641,9 +641,7 @@
 
   <!-- Initialization scripts ------------------------------------------------------------------>
   <script>
-    console.log('Client UUID: ' + clientUUID);
     const loaderElem = document.getElementById("loader"); // Spinner while pages load
-
 
     // Retrieve status from the server
     loaderElem.style.visibility = "visible";
@@ -651,6 +649,7 @@
       .then(() => {
         loaderElem.style.visibility = "hidden";
         checkVersion("dotdot1");
+        console.log('Client UUID: ' + clientUUID);
       });
     // Load time zone info, this runs asynchronously
     loadTimeZones();

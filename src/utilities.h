@@ -63,8 +63,6 @@ extern const char www_realm[];
 // automatically reboot after X seconds
 extern uint32_t rebootSeconds;
 
-// #define IP_ADDRESS_SIZE 16
-
 // Bitset that identifies what will trigger the motion sensor
 typedef struct
 {

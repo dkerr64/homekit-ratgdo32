@@ -14,17 +14,13 @@
  */
 #pragma once
 
-// C/C++ language includes
-
-// Arduino includes
 #include <Arduino.h>
-
-// RATGDO project includes
+#include <IPAddress.h>
+#ifdef ESP8266
+#include <LittleFS.h>
+#else
 #include "HomeSpan.h"
-#include "utilities.h"
-
-#define CRASH_LOG_MSG_FILE "/crash_log"
-#define REBOOT_LOG_MSG_FILE "/reboot_log"
+#endif
 
 #if defined(MMU_IRAM_HEAP) || !defined(ESP8266)
 // This can be large, but not too large.
@@ -40,7 +36,7 @@
 
 extern bool syslogEn;
 extern uint16_t syslogPort;
-extern char syslogIP[16];
+extern char syslogIP[IP4ADDR_STRLEN_MAX];
 extern bool suppressSerialLog;
 
 extern time_t rebootTime;
@@ -54,17 +50,62 @@ typedef struct logBuffer
     char buffer[LOG_BUFFER_SIZE - sizeof(wrapped) - sizeof(head)]; // sized so whole struct is LOG_BUFFER_SIZE bytes
 } logBuffer;
 
+#ifdef ESP8266
+/****************************************************************************
+ * On ESP8266 we roll our own log macros... to mimic what is available on ESP32.
+ * On ESP32 we use the system log macros and system intercept catch the messages.
+ */
+#define CRASH_LOG_MSG_FILE "/crash_log"
+#define REBOOT_LOG_MSG_FILE "/reboot_log"
+#ifndef ESP_LOG_LEVEL_T
+#define ESP_LOG_LEVEL_T
+typedef enum
+{
+    ESP_LOG_NONE,   /*!< No log output */
+    ESP_LOG_ERROR,  /*!< Critical errors, software module can not recover on its own */
+    ESP_LOG_WARN,   /*!< Error conditions from which recovery measures have been taken */
+    ESP_LOG_INFO,   /*!< Information messages which describe normal flow of events */
+    ESP_LOG_DEBUG,  /*!< Extra information which is not necessary for normal use (values, pointers, sizes, etc). */
+    ESP_LOG_VERBOSE /*!< Bigger chunks of debugging information, or frequent messages which can potentially flood the output. */
+} esp_log_level_t;
+#endif
+
+extern "C" esp_log_level_t logLevel;
+extern "C" void logToBuffer_P(const char *fmt, ...);
+extern void crashCallback();
+
+#define RATGDO_PRINTF(level, message, ...)               \
+    do                                                   \
+    {                                                    \
+        if (level <= logLevel)                           \
+            logToBuffer_P(PSTR(message), ##__VA_ARGS__); \
+    } while (0)
+
+#define ESP_LOGE(tag, message, ...) RATGDO_PRINTF(ESP_LOG_ERROR, "E (%lu) %s: " message "\r\n", millis(), tag, ##__VA_ARGS__)
+#define ESP_LOGW(tag, message, ...) RATGDO_PRINTF(ESP_LOG_WARN, "W (%lu) %s: " message "\r\n", millis(), tag, ##__VA_ARGS__)
+#define ESP_LOGI(tag, message, ...) RATGDO_PRINTF(ESP_LOG_INFO, "I (%lu) %s: " message "\r\n", millis(), tag, ##__VA_ARGS__)
+#define ESP_LOGD(tag, message, ...) RATGDO_PRINTF(ESP_LOG_DEBUG, "D (%lu) %s: " message "\r\n", millis(), tag, ##__VA_ARGS__)
+#define ESP_LOGV(tag, message, ...) RATGDO_PRINTF(ESP_LOG_VERBOSE, "V (%lu) %s: " message "\r\n", millis(), tag, ##__VA_ARGS__)
+
+#endif
+
 class LOG
 {
 private:
     char *lineBuffer = NULL; // Buffer for single message line
+#ifndef ESP8266
+    // ESP8266 is single thread and inherently serialized.  No mutex semaphores
     SemaphoreHandle_t logMutex = NULL;
+#endif
 
     static LOG *instancePtr;
     LOG();
 
 public:
     logBuffer *msgBuffer = NULL; // Buffer to save log messages as they occur
+#ifdef ESP8266
+    File logMessageFile; // File to save log messages on crash
+#endif
 
     LOG(const LOG &obj) = delete;
     static LOG *getInstance() { return instancePtr; }
@@ -78,9 +119,11 @@ public:
         va_end(args);
     };
     void printSavedLog(Print &outDevice = Serial, bool fromNVram = false);
+#ifdef ESP8266
+    void printSavedLog(File file, Print &outputDev);
+#endif
     void printMessageLog(Print &outDevice = Serial);
     void printCrashLog(Print &outDevice = Serial);
     void saveMessageLog(bool toNVram = false);
 };
-
 extern LOG *ratgdoLogger;
