@@ -648,6 +648,8 @@ void wallPlate_Emulation()
         {
             emulateWallPanel = true;
             ESP_LOGI(TAG, "No DIGITAL wall panel detected. Switching to emulation mode.");
+
+            garage_door.wallPanelEmulated = true;
         }
 
         // transmit every 250ms
@@ -2060,13 +2062,17 @@ void TTCtimerFn(void (*callback)(), bool light)
 #ifdef ESP8266
                                       schedule_recurrent_function_us([callback]()
                                                                      {
-                                                                         ESP_LOGI(TAG, "Calling delayed function 0x%08lX", (uint32_t)callback);
+                                                                         if (callback == door_command_close)
+                                                                            ESP_LOGI(TAG, "Calling delayed function: door_command_close()");
+
                                                                          callback();
                                                                          return false; // run the fn only once
                                                                      },
                                                                      0); // zero micro seconds (run asap)
 #else
-                                      ESP_LOGI(TAG, "Calling delayed function 0x%08lX", (uint32_t)callback);
+                                      if (callback == door_command_close)
+                                        ESP_LOGI(TAG, "Calling delayed function: door_command_close()");
+
                                       callback();
 #endif
                                   });
