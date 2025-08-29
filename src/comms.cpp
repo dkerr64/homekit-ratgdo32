@@ -738,7 +738,7 @@ void update_door_state(GarageDoorCurrentState current_state)
     }
     else if (current_state == CURR_CLOSED && garage_door.current_state == CURR_CLOSING && start_closing > 0)
     {
-        _millis_t close_duration = _millis() - start_opening;
+        _millis_t close_duration = _millis() - start_closing;
         close_counter++;
         close_average += ((int32_t)close_duration - (int32_t)close_average) / std::min(close_counter, FACTOR);
         garage_door.closeDuration = (close_average + 500) / 1000; // round up/down to closest second
@@ -2063,7 +2063,7 @@ void TTCtimerFn(void (*callback)(), bool light)
                                       schedule_recurrent_function_us([callback]()
                                                                      {
                                                                          if (callback == door_command_close)
-                                                                            ESP_LOGI(TAG, "Calling delayed function: door_command_close()");
+                                                                             ESP_LOGI(TAG, "Calling delayed function: door_command_close()");
 
                                                                          callback();
                                                                          return false; // run the fn only once
@@ -2071,8 +2071,7 @@ void TTCtimerFn(void (*callback)(), bool light)
                                                                      0); // zero micro seconds (run asap)
 #else
                                       if (callback == door_command_close)
-                                        ESP_LOGI(TAG, "Calling delayed function: door_command_close()");
-
+                                          ESP_LOGI(TAG, "Calling delayed function: door_command_close()");
                                       callback();
 #endif
                                   });
