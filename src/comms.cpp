@@ -597,7 +597,12 @@ void setup_comms()
     {
         // pin-based obstruction detection attempted only if user not requested to get from status
         ESP_LOGI(TAG, "Initialize for pin-based obstruction detection");
+#if defined(ESP8266) || defined(GRGDO1_V2)
         pinMode(INPUT_OBST_PIN, INPUT);
+#else
+        // enable pull up for pin inversion on RATDGO32/RATDGO32 DISCO (ESP32)
+        pinMode(INPUT_OBST_PIN, INPUT_PULLUP);
+#endif
         // FALLING from https://github.com/ratgdo/esphome-ratgdo/blob/e248c705c5342e99201de272cb3e6dc0607a0f84/components/ratgdo/ratgdo.cpp#L54C14-L54C14
         attachInterrupt(INPUT_OBST_PIN, isr_obstruction, FALLING);
     }
@@ -2640,16 +2645,21 @@ void obstruction_timer()
         }
         else if (pulse_count == 0)
         {
-            // if there have been no pulses the line is steady high or low
+#if defined(ESP8266) || defined(GRGDO1_V2)
+            // LOW?
             if (!digitalRead(INPUT_OBST_PIN))
+#else
+            // HIGH? (pin inversion on RATDGO32/RATDGO32 DISCO (ESP32))
+            if (digitalRead(INPUT_OBST_PIN))
+#endif
             {
-                // LOW, so it likely asleep
+                // likely asleep
                 obstruction_sensor.last_asleep = current_millis;
                 obstruction_sensor.pin_ever_changed = true;
             }
             else
             {
-                // HIGH, was last asleep more than 700ms ago, then there is an obstruction present
+                // was last asleep more than 700ms ago, then there is an obstruction present
                 if ((uint32_t)(current_millis - obstruction_sensor.last_asleep) > 700)
                 {
                     // Don't trust a HIGH pin that has never changed - likely floating/stuck
