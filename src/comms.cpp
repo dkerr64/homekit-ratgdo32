@@ -126,8 +126,6 @@ std::map<gdo_lock_state_t, LockTargetState> gdo_to_homekit_lock_target_state = {
 #else // not USE_GDOLIB
 /******************************* OBSTRUCTION SENSOR *********************************/
 
-// Track if we've detected a working obstruction sensor
-bool obstruction_sensor_detected = false;
 static bool get_obstruction_from_status = false;
 
 struct obstruction_sensor_t
@@ -1009,7 +1007,7 @@ void sec1_process_message(uint8_t key, uint8_t value)
 
         // Handle obstruction from status packet if pin-based detection not used
         static uint8_t prevObstruction = 0xFF; // Initialize to invalid value
-        if (!obstruction_sensor_detected && value != prevObstruction)
+        if (!garage_door.pinModeObstructionSensor && value != prevObstruction)
         {
             // Reported value has changed
             bool status_obstructed = bitRead(value, 0);
@@ -1411,7 +1409,7 @@ void comms_loop_sec2()
                 }
 
                 // Handle obstruction from status packet if pin-based detection not available
-                if (!obstruction_sensor_detected)
+                if (!garage_door.pinModeObstructionSensor)
                 {
                     // Status packet obstruction field is inverted: 1=clear, 0=obstructed
                     bool status_obstructed = !pkt.m_data.value.status.obstruction;
@@ -1579,7 +1577,7 @@ void comms_loop_sec2()
             case PacketCommand::Pair3Resp:
             {
                 // Only use Pair3Resp for obstruction detection if no sensor detected
-                if (!obstruction_sensor_detected)
+                if (!garage_door.pinModeObstructionSensor)
                 {
                     // Use Pair3Resp packets for obstruction detection via parity
                     // byte1 9 = clear, byte1 14 = obstructed
@@ -2084,7 +2082,7 @@ void door_command_close()
 #ifdef USE_GDOLIB
     gdo_door_close();
 #else
-    if (obstruction_sensor_detected)
+    if (garage_door.pinModeObstructionSensor)
     {
         door_command(DoorAction::Close);
     }
@@ -2622,9 +2620,9 @@ void obstruction_timer()
         {
             // We're getting pulses, so pin detection is working
             obstruction_sensor.pin_ever_changed = true;
-            if (!obstruction_sensor_detected)
+            if (!garage_door.pinModeObstructionSensor)
             {
-                obstruction_sensor_detected = true;
+                garage_door.pinModeObstructionSensor = true;
                 ESP_LOGI(TAG, "Pin-based obstruction detection active");
             }
 
@@ -2642,19 +2640,16 @@ void obstruction_timer()
         }
         else if (pulse_count == 0)
         {
-// if there have been no pulses the line is steady high or low
-#ifdef ESP8266
+            // if there have been no pulses the line is steady high or low
             if (!digitalRead(INPUT_OBST_PIN))
-#else
-            if (digitalRead(INPUT_OBST_PIN))
-#endif
             {
+                // LOW, so it likely asleep
                 obstruction_sensor.last_asleep = current_millis;
                 obstruction_sensor.pin_ever_changed = true;
             }
             else
             {
-                // if the line is high and was last asleep more than 700ms ago, then there is an obstruction present
+                // HIGH, was last asleep more than 700ms ago, then there is an obstruction present
                 if ((uint32_t)(current_millis - obstruction_sensor.last_asleep) > 700)
                 {
                     // Don't trust a HIGH pin that has never changed - likely floating/stuck
