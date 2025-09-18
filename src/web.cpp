@@ -349,7 +349,7 @@ void web_loop()
         // First time through, zero offset from upTime, which is when we last rebooted)
         JSON_ADD_INT("lastDoorUpdateAt", (upTime - lastDoorUpdateAt));
     }
-#ifndef ESP8266
+#ifdef RATGDO32_DISCO
     // Feature not available on ESP8266
     if (garage_door.has_distance_sensor)
     {
@@ -803,6 +803,7 @@ void handle_status()
 #ifdef USE_GDOLIB
     JSON_ADD_BOOL(cfg_useSWserial, userConfig->getUseSWserial());
 #endif
+#ifdef RATGDO32_DISCO
     JSON_ADD_BOOL("distanceSensor", garage_door.has_distance_sensor);
     if (garage_door.has_distance_sensor)
     {
@@ -811,6 +812,7 @@ void handle_status()
         last_reported_assist_laser = laser.state();
         JSON_ADD_BOOL("assistLaser", last_reported_assist_laser);
     }
+#endif
     JSON_ADD_BOOL(cfg_vehicleHomeKit, userConfig->getVehicleHomeKit());
     JSON_ADD_INT(cfg_vehicleThreshold, userConfig->getVehicleThreshold());
     JSON_ADD_BOOL(cfg_laserEnabled, userConfig->getLaserEnabled());
@@ -962,7 +964,7 @@ bool helperFactoryReset(const std::string &key, const char *value, configSetting
     return true;
 }
 
-#ifndef ESP8266
+#ifdef RATGDO32_DISCO
 bool helperAssistLaser(const std::string &key, const char *value, configSetting *action)
 {
     if (atoi(value) == 1)
@@ -986,7 +988,7 @@ void handle_setgdo()
         {"credentials", {false, false, 0, helperCredentials}}, // parse out wwwUsername and credentials
         {"updateUnderway", {false, false, 0, helperUpdateUnderway}},
         {"factoryReset", {true, false, 0, helperFactoryReset}},
-#ifndef ESP8266
+#ifdef RATGDO32_DISCO
         {"assistLaser", {false, false, 0, helperAssistLaser}},
 #endif
     };
@@ -1126,7 +1128,7 @@ void SSEheartbeat(SSESubscription *s)
         JSON_ADD_INT("freeHeap", free_heap);
         JSON_ADD_INT("minHeap", min_heap);
         // TODO monitor stack... JSON_ADD_INT("minStack", ESP.getFreeContStack());
-#ifndef ESP8266
+#ifdef RATGDO32_DISCO
         static int32_t lastVehicleDistance = 0;
         if (garage_door.has_distance_sensor && (lastVehicleDistance != vehicleDistance))
         {

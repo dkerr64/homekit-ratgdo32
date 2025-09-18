@@ -24,12 +24,14 @@
 #include "homekit.h"
 #include "config.h"
 
+#ifdef RATGDO32_DISCO
+
 // Logger tag
 static const char *TAG = "ratgdo-vehicle";
 bool vehicle_setup_done = false;
 bool vehicle_setup_error = false;
 
-VL53L4CX distanceSensor(&Wire, SHUTDOWN_PIN);
+VL53L4CX distanceSensor(&Wire, SENSOR_SHUTDOWN_PIN);
 
 static const int MIN_DISTANCE = 25;   // ignore bugs crawling on the distance sensor
 static const int MAX_DISTANCE = 4500; // 4.5 meters, maximum range of the sensor
@@ -58,7 +60,7 @@ void setup_vehicle()
 
     ESP_LOGI(TAG, "=== Setup VL53L4CX time-of-flight sensor ===");
 
-    if (!Wire.begin(19, 18))
+    if (!Wire.begin(SENSOR_SDA_PIN, SENSOR_SCL_PIN))
     {
         ESP_LOGE(TAG, "VL53L4CX pin setup failed");
         vehicle_setup_error = true;
@@ -294,3 +296,4 @@ void doorClosing()
         ESP_LOGI(TAG, "Vehicle status: %s at %s", vehicleStatus, timeString());
     }
 }
+#endif

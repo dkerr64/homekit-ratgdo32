@@ -215,7 +215,9 @@ bool helperVehicleThreshold(const std::string &key, const char *value, configSet
 {
     userConfig->set(key, value);
     // set globals so takes effect immediately
+    #ifdef RATGDO32_DISCO
     vehicleThresholdDistance = (uint32_t)std::stoi(value) * 10; // convert centimeters to millimeters
+    #endif
     return true;
 }
 

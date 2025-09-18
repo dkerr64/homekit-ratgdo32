@@ -351,7 +351,9 @@ void connectionCallback(int count)
         {
             get_auto_timezone();
         }
+#ifdef RATGDO32_DISCO
         setup_vehicle();
+#endif
         setup_comms();
 #ifndef USE_GDOLIB
         setup_drycontact();
@@ -362,7 +364,9 @@ void connectionCallback(int count)
     static bool startupBeeped = false;
     if (!startupBeeped)
     {
+#ifdef RATGDO32_DISCO
         tone(BEEPER_PIN, 2000, 500);
+#endif
         startupBeeped = true;
     }
 }
@@ -657,7 +661,7 @@ void setup_homekit()
 
     ESP_LOGI(TAG, "=== Setup HomeKit accessories and services ===");
 
-    //homeSpan.setLogLevel(0); Zero is default (top level messages only), comment out so can be controlled by Improv setup.
+    // homeSpan.setLogLevel(0); Zero is default (top level messages only), comment out so can be controlled by Improv setup.
     homeSpan.setSketchVersion(AUTO_VERSION);
     homeSpan.setHostNameSuffix("");
     homeSpan.setPortNum(5556);
@@ -787,6 +791,7 @@ boolean DEV_Info::update()
     // LED, Laser and Tone calls are all asynchronous.  We will illuminate LED and Laser
     // for 2 seconds, during which we will play tone.  Function will return after 1.5 seconds.
     led.flash(2000);
+#ifdef RATGDO32_DISCO
     laser.flash(2000);
     tone(BEEPER_PIN, 1300);
     delay(500);
@@ -795,6 +800,7 @@ boolean DEV_Info::update()
     tone(BEEPER_PIN, 1300);
     delay(500);
     tone(BEEPER_PIN, 2000, 500);
+#endif
     return true;
 }
 
@@ -881,6 +887,7 @@ boolean DEV_Light::update()
     {
         set_light(DEV_Light::on->getNewVal<bool>());
     }
+    #ifdef RATGDO32_DISCO
     else if (this->type == Light_t::ASSIST_LASER)
     {
         if (on->getNewVal<bool>())
@@ -894,6 +901,7 @@ boolean DEV_Light::update()
             laser.off();
         }
     }
+    #endif
     return true;
 }
 

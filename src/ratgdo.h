@@ -82,30 +82,50 @@ enum LockTargetState : uint8_t
     TGT_LOCKED = 1,
 };
 #else
-#ifdef GRGDO1_V2
-const gpio_num_t UART_TX_PIN = GPIO_NUM_22;
-const gpio_num_t INPUT_OBST_PIN = GPIO_NUM_23;
-#else
-const gpio_num_t UART_TX_PIN = GPIO_NUM_17;
-const gpio_num_t INPUT_OBST_PIN = GPIO_NUM_4;
-#endif
-const gpio_num_t UART_RX_PIN = GPIO_NUM_21;
-const gpio_num_t LED_BUILTIN = GPIO_NUM_2;
-const gpio_num_t DRY_CONTACT_OPEN_PIN = GPIO_NUM_13;  // open door contact sensor
-const gpio_num_t DRY_CONTACT_CLOSE_PIN = GPIO_NUM_14; // closed door contact sensor
-const gpio_num_t LIGHT_PIN = GPIO_NUM_27;             // control a light
-const gpio_num_t DISCRETE_OPEN_PIN = GPIO_NUM_26;     // alternative (or in addition) to toggle, can use discrete open control
-const gpio_num_t DISCRETE_CLOSE_PIN = GPIO_NUM_25;    // alternative (or in addition) to toggle, can use discrete close control
 
+#if defined (MJS_GADGETS) 
+const gpio_num_t UART_TX_PIN = GPIO_NUM_22;
+const gpio_num_t UART_RX_PIN = GPIO_NUM_21;
+const gpio_num_t INPUT_OBST_PIN = GPIO_NUM_23;
+const gpio_num_t LED_BUILTIN = GPIO_NUM_16;
+const gpio_num_t DRY_CONTACT_OPEN_PIN = GPIO_NUM_13;  // open door
+const gpio_num_t DRY_CONTACT_CLOSE_PIN = GPIO_NUM_14; // close door
+const gpio_num_t DRY_CONTACT_LIGHT_PIN = GPIO_NUM_27; // toggle light !!! not coded
 const gpio_num_t STATUS_DOOR_PIN = GPIO_NUM_26;
 const gpio_num_t STATUS_OBST_PIN = GPIO_NUM_25;
-
+#elif defined (GRGDO1_V2)
+const gpio_num_t UART_TX_PIN = GPIO_NUM_22;
+const gpio_num_t UART_RX_PIN = GPIO_NUM_21;
+const gpio_num_t INPUT_OBST_PIN = GPIO_NUM_23;  // !!! CONFLICTS with LASER_PIN !!!
+const gpio_num_t LED_BUILTIN = GPIO_NUM_2;
+const gpio_num_t DRY_CONTACT_OPEN_PIN = GPIO_NUM_18;  // open door
+const gpio_num_t DRY_CONTACT_CLOSE_PIN = GPIO_NUM_19; // close door
+const gpio_num_t DRY_CONTACT_LIGHT_PIN = GPIO_NUM_17; // toggle light !!! not coded
+#else
+// RATGDO32
+const gpio_num_t UART_TX_PIN = GPIO_NUM_17;
+const gpio_num_t UART_RX_PIN = GPIO_NUM_21;
+const gpio_num_t INPUT_OBST_PIN = GPIO_NUM_4;
+const gpio_num_t LED_BUILTIN = GPIO_NUM_2;
+const gpio_num_t DRY_CONTACT_OPEN_PIN = GPIO_NUM_13;  // open door
+const gpio_num_t DRY_CONTACT_CLOSE_PIN = GPIO_NUM_14; // close door
+const gpio_num_t DRY_CONTACT_LIGHT_PIN = GPIO_NUM_27; // toggle light !!! not coded
+const gpio_num_t STATUS_DOOR_PIN = GPIO_NUM_26;
+const gpio_num_t STATUS_OBST_PIN = GPIO_NUM_25;
+// !!! this is conflicting with above status pins
+#ifdef USE_GDOLIB
+const gpio_num_t DISCRETE_OPEN_PIN = GPIO_NUM_26;     // alternative (or in addition) to toggle, can use discrete open control
+const gpio_num_t DISCRETE_CLOSE_PIN = GPIO_NUM_25;    // alternative (or in addition) to toggle, can use discrete close control
+#endif
+#define RATGDO32_DISCO
 const gpio_num_t BEEPER_PIN = GPIO_NUM_33;
 const gpio_num_t LASER_PIN = GPIO_NUM_23;
-const gpio_num_t SENSOR_PIN = GPIO_NUM_34;
+const gpio_num_t SENSOR_SDA_PIN = GPIO_NUM_19;
+const gpio_num_t SENSOR_SCL_PIN = GPIO_NUM_18;
+const gpio_num_t SENSOR_SHUTDOWN_PIN = GPIO_NUM_32;
+#endif
 
-const gpio_num_t SHUTDOWN_PIN = GPIO_NUM_32;
-
+// enums
 enum GarageDoorCurrentState : uint8_t
 {
     CURR_OPEN = Characteristic::CurrentDoorState::OPEN,

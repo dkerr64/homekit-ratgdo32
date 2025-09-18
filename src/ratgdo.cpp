@@ -112,8 +112,9 @@ void setup()
     disable_extra4k_at_link_time();
 #else
     esp_core_dump_init();
-    // No buzzer on ESP8266
+#ifdef RATGDO32_DISCO
     tone(BEEPER_PIN, 1300, 500);
+#endif
 #endif // ESP32
     led.on();
     ESP_LOGI(TAG, "=== Starting RATGDO Homekit version %s", AUTO_VERSION);
@@ -214,7 +215,9 @@ void loop()
     // On ESP32 Wifi is handled within HomeSpan library which has its own freeRTOS task
     // Features not available on ESP8266
     YIELD();
+#ifdef RATGDO32_DISCO
     vehicle_loop();
+#endif
 #endif
     YIELD();
     web_loop();
