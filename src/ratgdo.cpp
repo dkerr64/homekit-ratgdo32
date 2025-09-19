@@ -128,6 +128,13 @@ void setup()
     load_all_config_settings();
     // Now set log level to whatever user has requested
     logLevel = (esp_log_level_t)userConfig->getLogLevel();
+    // Initialize crash count... which can persist over reboots
+    crashCount = saveCrash.count();
+    if (crashCount == 255)
+    {
+        saveCrash.clear();
+        crashCount = 0;
+    }
 #else
     esp_reset_reason_t r = esp_reset_reason();
     switch (r)
@@ -262,12 +269,15 @@ void service_timer_loop()
                 lastDoorUpdateAt = (_millis_t)(((time_t)userConfig->getDoorUpdateAt() - timeNow) * 1000LL) + current_millis;
                 ESP_LOGI(TAG, "Last door update at: %s", timeString((time_t)userConfig->getDoorUpdateAt()));
             }
-            if (strlen(userConfig->getTimeZone()) == 0)
+            if (userConfig->getDoorOpenAt() != 0)
             {
-                // no timeZone set, try and find it automatically
-                get_auto_timezone();
-                // if successful this will have set the region and city, but not
-                // the POSIX time zone code. That will be done by browser.
+                lastDoorOpenAt = (_millis_t)(((time_t)userConfig->getDoorOpenAt() - timeNow) * 1000LL) + current_millis;
+                ESP_LOGI(TAG, "Last door open at:   %s", timeString((time_t)userConfig->getDoorOpenAt()));
+            }
+            if (userConfig->getDoorCloseAt() != 0)
+            {
+                lastDoorCloseAt = (_millis_t)(((time_t)userConfig->getDoorCloseAt() - timeNow) * 1000LL) + current_millis;
+                ESP_LOGI(TAG, "Last door close at:  %s", timeString((time_t)userConfig->getDoorCloseAt()));
             }
         }
     }
