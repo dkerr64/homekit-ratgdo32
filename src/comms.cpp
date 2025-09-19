@@ -419,7 +419,7 @@ void setup_comms()
         ESP_LOGI(TAG, "=== Setting up comms for SECURITY+1.0 protocol");
 
 #ifdef SEC1_DISCONNECT_WP
-        // GPIO16 - D0
+        // ESP32:GPIO_NUM_26 - ESP8266:GPIO_NUM16(D0)
         // ⁡⁢⁣⁢NC RELAY (AQY412)⁡
         // enable wall panel
         wallPanelConnected = WP_CONNECTED;
@@ -1720,7 +1720,7 @@ void comms_loop()
 bool transmitSec1(byte toSend)
 {
     bool noSend = false;
-    bool badSend = false;
+    bool success = false;
 
     // safety #1
     if (sw_serial.available())
@@ -1770,6 +1770,20 @@ bool transmitSec1(byte toSend)
     // aprox 10ms to write byte
     sw_serial.write(toSend);
 
+    _millis_t before = _millis();
+    while (!sw_serial.available())
+    {
+        if ((_millis() - before) >= 20)
+        {
+            ESP_LOGD(TAG, "SEC1 TX ECHO TIMEDOUT");
+            break;
+        }
+
+        yield();
+    };
+
+    success = true;
+
     // use this to "confirm" tx byte
     if (!poll_cmd)
     {
@@ -1780,7 +1794,7 @@ bool transmitSec1(byte toSend)
             // LOST THE BYTE COMPLETELY
             ESP_LOGD(TAG, "SEC1 TX LOST ECHO OF: 0x%02X", toSend);
 
-            badSend = true;
+            //success = false;
         }
         else
         {
@@ -1789,7 +1803,7 @@ bool transmitSec1(byte toSend)
             {
                 ESP_LOGD(TAG, "SEC1 TX MISMATCH ECHO OF: tx:0x%02X rx:0x%02X", toSend, echoByte);
 
-                badSend = true;
+                success = false;
             }
             else
             {
@@ -1820,14 +1834,7 @@ bool transmitSec1(byte toSend)
 #endif
     }
 
-    // bad send? set up to try again
-    if (badSend == true)
-    {
-        clearToSend = false;
-        return false;
-    }
-
-    return true;
+    return success;
 }
 
 /**************************** CONTROLLER CODE *******************************

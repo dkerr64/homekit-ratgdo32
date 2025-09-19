@@ -84,9 +84,10 @@ enum LockTargetState : uint8_t
 #else
 
 #if defined (MJS_GADGETS) 
-const gpio_num_t UART_TX_PIN = GPIO_NUM_22;
+// the same as RATGDO except LED (till new rev)
+const gpio_num_t UART_TX_PIN = GPIO_NUM_17;
 const gpio_num_t UART_RX_PIN = GPIO_NUM_21;
-const gpio_num_t INPUT_OBST_PIN = GPIO_NUM_23;
+const gpio_num_t INPUT_OBST_PIN = GPIO_NUM_4;
 const gpio_num_t LED_BUILTIN = GPIO_NUM_16;
 const gpio_num_t DRY_CONTACT_OPEN_PIN = GPIO_NUM_13;  // open door
 const gpio_num_t DRY_CONTACT_CLOSE_PIN = GPIO_NUM_14; // close door
