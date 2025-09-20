@@ -38,12 +38,11 @@
 #include "softAP.h"
 #ifdef ESP8266
 #include "wifi_8266.h"
-#else
-// Feature not available on ESP8266
+#endif
+#ifdef RATGDO32_DISCO
 #include "vehicle.h"
 #endif
-
-#if defined(ESP8266) || !defined(USE_GDOLIB)
+#ifndef USE_GDOLIB
 #include "drycontact.h"
 #endif
 
@@ -59,11 +58,10 @@ GarageDoor garage_door = {
     .target_state = (GarageDoorTargetState)0xFF,
     .obstructed = false,
     .has_motion_sensor = false,
-#ifndef ESP8266
-    // Feature not available on ESP8266
+#ifdef RATGDO32_DISCO
     .has_distance_sensor = false,
 #endif
-#if defined(ESP8266) || !defined(USE_GDOLIB)
+#ifndef USE_GDOLIB
     .motion_timer = 0,
 #endif
     .motion = false,
@@ -221,6 +219,7 @@ void loop()
 #else
     // On ESP32 Wifi is handled within HomeSpan library which has its own freeRTOS task
     // Features not available on ESP8266
+#ifdef RATGDO32_DISCO
     YIELD();
 #ifdef RATGDO32_DISCO
     vehicle_loop();

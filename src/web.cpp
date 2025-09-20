@@ -42,7 +42,8 @@
 #include "led.h"
 #ifdef ESP8266
 #include "wifi_8266.h"
-#else
+#endif
+#ifdef RATGDO32_DISCO
 #include "vehicle.h"
 #endif
 #include "www/build/webcontent.h"
@@ -832,6 +833,7 @@ void handle_status()
     JSON_ADD_BOOL(cfg_laserEnabled, userConfig->getLaserEnabled());
     JSON_ADD_BOOL(cfg_laserHomeKit, userConfig->getLaserHomeKit());
     JSON_ADD_INT(cfg_assistDuration, userConfig->getAssistDuration());
+#endif
     JSON_ADD_BOOL(cfg_homespanCLI, userConfig->getEnableHomeSpanCLI());
 #endif
     JSON_ADD_INT("webRequests", request_count);

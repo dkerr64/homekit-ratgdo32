@@ -25,23 +25,19 @@
 #include "comms.h"
 #include "led.h"
 
-#ifdef ESP32
 #ifdef USE_GDOLIB
 #include "gdo.h"
 #else // USE_GDOLIB
 #include "SoftwareSerial.h"
-#include "../lib/ratgdo/Packet.h"
-#include "../lib/ratgdo/Reader.h"
-#include "../lib/ratgdo/secplus2.h"
-#include "drycontact.h"
-#endif // USE_GDOLIB
-#else  // ESP32
-#include "SoftwareSerial.h"
 #include "Reader.h"
 #include "secplus2.h"
 #include "Packet.h"
+#include "drycontact.h"
+#endif // USE_GDOLIB
+
+#ifdef ESP8266
 #include "cQueue.h"
-#endif // ESP32
+#endif // ESP8266
 
 static const char *TAG = "ratgdo-comms";
 
