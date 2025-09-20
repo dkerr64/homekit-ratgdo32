@@ -221,6 +221,7 @@ void loop()
     // Features not available on ESP8266
 #ifdef RATGDO32_DISCO
     YIELD();
+#ifdef RATGDO32_DISCO
     vehicle_loop();
 #endif
 #endif
