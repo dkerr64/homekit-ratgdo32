@@ -190,7 +190,6 @@ bool helperLogLevel(const std::string &key, const char *value, configSetting *ac
 {
     userConfig->set(key, value);
 #ifdef ESP32
-    // Now set log level to whatever user has requested
     esp_log_level_set("*", (esp_log_level_t)userConfig->getLogLevel());
 #else
     logLevel = (esp_log_level_t)userConfig->getLogLevel();
@@ -219,9 +218,7 @@ bool helperVehicleThreshold(const std::string &key, const char *value, configSet
 {
     userConfig->set(key, value);
     // set globals so takes effect immediately
-    #ifdef RATGDO32_DISCO
     vehicleThresholdDistance = (uint32_t)std::stoi(value) * 10; // convert centimeters to millimeters
-    #endif
     return true;
 }
 

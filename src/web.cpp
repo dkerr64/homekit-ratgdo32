@@ -137,14 +137,13 @@ const char *http_methods[] = {"HTTP_ANY", "HTTP_GET", "HTTP_HEAD", "HTTP_POST", 
 // All this is to support a 303 redirect to js.map files when debugging, so we don't have to embed in our firmware !!!!
 #ifndef STRINGIFY
 #define STRINGIFY_HELPER(x) #x
-#define STRINGIFY_ME(x) STRINGIFY_HELPER(x)
-// If not building in main github repo, then add -D GITUSER=your_userid to the compile line (no quotes, STRINGIFY_ME adds that here)
+#define STRINGIFY(x) STRINGIFY_HELPER(x)
 #endif
 // If not building in main github repo, then add -D GITUSER=your_userid to the compile line (no quotes, STRINGIFY adds that here)
 #ifndef GITUSER
 #define _GITUSER "ratgdo"
 #else
-#define _GITUSER STRINGIFY_ME(GITUSER)
+#define _GITUSER STRINGIFY(GITUSER)
 #endif
 #ifndef GITREPO
 #ifdef ESP8266
@@ -153,12 +152,12 @@ const char *http_methods[] = {"HTTP_ANY", "HTTP_GET", "HTTP_HEAD", "HTTP_POST", 
 #define _GITREPO "homekit-ratgdo32"
 #endif
 #else
-#define _GITREPO STRINGIFY_ME(GITREPO)
+#define _GITREPO STRINGIFY(GITREPO)
 #endif
 #ifndef GITBRANCH
 #define _GITBRANCH "main"
 #else
-#define _GITBRANCH STRINGIFY_ME(GITBRANCH)
+#define _GITBRANCH STRINGIFY(GITBRANCH)
 #endif
 constexpr char gitUser[] = _GITUSER;
 constexpr char gitRepo[] = _GITREPO;
@@ -827,7 +826,6 @@ void handle_status()
         last_reported_assist_laser = laser.state();
         JSON_ADD_BOOL("assistLaser", last_reported_assist_laser);
     }
-#endif
     JSON_ADD_BOOL(cfg_vehicleHomeKit, userConfig->getVehicleHomeKit());
     JSON_ADD_INT(cfg_vehicleThreshold, userConfig->getVehicleThreshold());
     JSON_ADD_BOOL(cfg_laserEnabled, userConfig->getLaserEnabled());

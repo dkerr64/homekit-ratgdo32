@@ -8,7 +8,7 @@
  * Licensed under terms of the GPL-3.0 License.
  *
  */
-#ifdef RATGDO32_DISCO
+
 // C/C++ language includes
 // None
 
