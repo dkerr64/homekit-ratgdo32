@@ -1272,7 +1272,7 @@ void comms_loop_sec1()
                 {
                     if (retryCount++ < MAX_COMMS_RETRY)
                     {
-                        ESP_LOGD(TAG, "SEC1 TX send failed, will retry retryCount=%d", retryCount);
+                        ESP_LOGD(TAG, "SEC1 TX send failed, will retry. retryCount=%d", retryCount);
 #ifdef ESP32
                         xQueueSendToFront(pkt_q, &pkt_ac, 0); // ignore errors
 #endif
