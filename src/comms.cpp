@@ -58,7 +58,11 @@ QueueHandle_t pkt_q;
 #else
 Queue_t pkt_q;
 #endif // ESP32
-SoftwareSerial sw_serial;
+#ifndef USE_HW_UART
+SoftwareSerial my_serial;
+#else
+HardwareSerial my_serial(2);
+#endif
 #endif // not USE_GDOLIB
 
 #define SECPLUS1_DIGITAL_WALLPLATE_TIMEOUT 15000
@@ -422,8 +426,12 @@ void setup_comms()
         digitalWrite(STATUS_DOOR_PIN, wallPanelConnected);
 #endif
 
-        sw_serial.begin(1200, SWSERIAL_8E1, UART_RX_PIN, UART_TX_PIN, true, 32);
-        sw_serial.onReceive(receiveHandler);
+#ifndef USE_HW_UART
+        my_serial.begin(1200, SWSERIAL_8E1, UART_RX_PIN, UART_TX_PIN, true, 32);
+        my_serial.onReceive(receiveHandler);
+#else
+        my_serial.begin(1200, SERIAL_8E1, UART_RX_PIN, UART_TX_PIN, true);
+#endif
         wallPanelDetected = false;
         wallPanelBooting = false;
         doorState = GarageDoorCurrentState::UNKNOWN;
@@ -433,10 +441,13 @@ void setup_comms()
     else if (doorControlType == 2)
     {
         ESP_LOGI(TAG, "=== Setting up comms for SECURITY+2.0 protocol");
-
-        sw_serial.begin(9600, SWSERIAL_8N1, UART_RX_PIN, UART_TX_PIN, true, 32);
-        sw_serial.enableIntTx(false);
-        sw_serial.enableAutoBaud(true); // found in ratgdo/espsoftwareserial branch autobaud
+#ifndef USE_HW_UART
+        my_serial.begin(9600, SWSERIAL_8N1, UART_RX_PIN, UART_TX_PIN, true, 32);
+        my_serial.enableIntTx(false);
+        my_serial.enableAutoBaud(true); // found in ratgdo/espsoftwareserial branch autobaud
+#else
+        my_serial.begin(9600, SERIAL_8N1, UART_RX_PIN, UART_TX_PIN, true);
+#endif
 
 #ifdef ESP32
         id_code = nvRam->read(nvram_id_code);
@@ -498,7 +509,7 @@ void setup_comms()
             .dc_close_pin = GPIO_NUM_0, // disable dry-contact
             .dc_discrete_open_pin = GPIO_NUM_0,
             .dc_discrete_close_pin = GPIO_NUM_0,
-            .use_sw_serial = userConfig->getUseSWserial(),
+            .use_my_serial = userConfig->getUseSWserial(),
         };
         if (userConfig->getDCOpenClose())
         {
@@ -1112,9 +1123,9 @@ void comms_loop_sec1()
 
     // get all the rxed bytes processed now
     // any rx bytes will reset clearToSend
-    while (sw_serial.available())
+    while (my_serial.available())
     {
-        uint8_t ser_byte = sw_serial.read();
+        uint8_t ser_byte = my_serial.read();
 
         clearToSend = false;
 
@@ -1137,8 +1148,9 @@ void comms_loop_sec1()
             break;
         }
 
+#ifndef USE_HW_UART
         // parity check on byte
-        if (sw_serial.readParity() != sw_serial.parityEven(ser_byte))
+        if (my_serial.readParity() != my_serial.parityEven(ser_byte))
         {
             if (reading_msg)
                 ESP_LOGD(TAG, "SEC1 RX Parity error on 2nd byte of poll msg [0x%02X:0x%02X]", rx_packet[0], ser_byte);
@@ -1150,6 +1162,9 @@ void comms_loop_sec1()
 
             continue;
         }
+#else
+// todo: discover way to check parity there is a callback for onerror
+#endif
 
         // upper nibble always 0x3 for press/release/poll bytes (0x30 - 0x3A)
         // no GDO response has upper nibble 0x3, and its validated in sec1_process_message()
@@ -1201,11 +1216,11 @@ void comms_loop_sec1()
         }
     }
 
-    // if still reading the message in, no need to process further
-    // as its not a good time to TX, and next byte is expected within 10ms
-    // check if a rx byte became available
-    // or if a rx bit has been has been received, exit and process (on next comm_loop())
-    if (reading_msg == true || sw_serial.available() || isRxPending())
+// if still reading the message in, no need to process further
+// as its not a good time to TX, and next byte is expected within 10ms
+// check if a rx byte became available
+// or if a rx bit has been has been received, exit and process (on next comm_loop())
+    if (reading_msg == true || my_serial.available() || isRxPending())
     {
         return;
     }
@@ -1300,7 +1315,7 @@ void comms_loop_sec2()
 {
     static uint32_t retryCount = 0;
 
-    if (!sw_serial.available() && ((_millis() - last_tx) > SECPLUS2_TX_MINIMUM_DELAY))
+    if (!my_serial.available() && ((_millis() - last_tx) > SECPLUS2_TX_MINIMUM_DELAY))
     {
         // no incoming data, check if we have command queued
         PacketAction pkt_ac;
@@ -1351,7 +1366,8 @@ void comms_loop_sec2()
     else
     {
         // spin on receiving data until the whole packet has arrived
-        uint8_t ser_data = sw_serial.read();
+        uint8_t ser_data = my_serial.read();
+
         if (reader.push_byte(ser_data))
         {
             Packet pkt = Packet(reader.fetch_buf());
@@ -1719,7 +1735,7 @@ bool transmitSec1(byte toSend)
     bool success = false;
 
     // safety #1
-    if (sw_serial.available())
+    if (my_serial.available())
     {
         ESP_LOGD(TAG, "SEC1 TX incoming data detected, cannot send right now");
         noSend = true;
@@ -1754,7 +1770,7 @@ bool transmitSec1(byte toSend)
 
         // testing without disable
         // disable rx
-        // sw_serial.enableRx(false);
+        // my_serial.enableRx(false);
 
 #ifdef SEC1_DISCONNECT_WP
         // will reconnect in after tx complete + 5ms
@@ -1764,10 +1780,10 @@ bool transmitSec1(byte toSend)
     }
 
     // aprox 10ms to write byte
-    sw_serial.write(toSend);
+    my_serial.write(toSend);
 
     _millis_t before = _millis();
-    while (!sw_serial.available())
+    while (!my_serial.available())
     {
         if ((_millis() - before) >= 20)
         {
@@ -1784,13 +1800,13 @@ bool transmitSec1(byte toSend)
     if (!poll_cmd)
     {
         // read off echo, it is ready right after the write()
-        int echoByte = sw_serial.read();
+        int echoByte = my_serial.read();
         if (echoByte == -1)
         {
             // LOST THE BYTE COMPLETELY
             ESP_LOGD(TAG, "SEC1 TX LOST ECHO OF: 0x%02X", toSend);
 
-            //success = false;
+            // success = false;
         }
         else
         {
@@ -1816,14 +1832,14 @@ bool transmitSec1(byte toSend)
     if (!poll_cmd)
     {
         // enable rx
-        // sw_serial.enableRx(true);
+        // my_serial.enableRx(true);
 
 #ifdef SEC1_DISCONNECT_WP
         // reconnect after tx complete
         delay(5);
         // clear off any bits, as wp been disconnected (also resets rxPending)
         if (isRxPending())
-            sw_serial.flush();
+            my_serial.flush();
 
         wallPanelConnected = WP_CONNECTED;
         digitalWrite(STATUS_DOOR_PIN, wallPanelConnected);
@@ -1862,7 +1878,7 @@ bool transmitSec2(PacketAction &pkt_ac)
         {
             // Use LED to signal activity
             led.flash(FLASH_MS);
-            sw_serial.write(buf, SECPLUS2_CODE_LEN);
+            my_serial.write(buf, SECPLUS2_CODE_LEN);
             delayMicroseconds(100);
             // timestamp tx
             last_tx = _millis();
