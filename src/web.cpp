@@ -42,8 +42,8 @@
 #include "led.h"
 #ifdef ESP8266
 #include "wifi_8266.h"
-#include "EspSaveCrash.h"
-#else
+#endif
+#ifdef RATGDO32_DISCO
 #include "vehicle.h"
 #endif
 #include "www/build/webcontent.h"
@@ -76,10 +76,6 @@ char *test_str = NULL;
 void handle_update();
 void handle_firmware_upload();
 void SSEHandler(uint32_t channel);
-
-#ifdef ESP8266
-EspSaveCrash saveCrash(1408, 1024, true, &crashCallback);
-#endif
 
 // Built in URI handlers
 const char restEvents[] = "/rest/events/";
@@ -116,6 +112,8 @@ GarageDoor last_reported_garage_door;
 bool last_reported_paired = false;
 bool last_reported_assist_laser = false;
 _millis_t lastDoorUpdateAt;
+_millis_t lastDoorOpenAt;
+_millis_t lastDoorCloseAt;
 GarageDoorCurrentState lastDoorState = (GarageDoorCurrentState)0xff;
 
 static bool web_setup_done = false;
@@ -136,9 +134,11 @@ constexpr char response200[] = "HTTP/1.1 200 OK\nContent-Type: text/plain\nConne
 
 const char *http_methods[] = {"HTTP_ANY", "HTTP_GET", "HTTP_HEAD", "HTTP_POST", "HTTP_PUT", "HTTP_PATCH", "HTTP_DELETE", "HTTP_OPTIONS"};
 
-// All this is to support a 303 redirect to js.map files when debugging, so we don't have to embedd in our firmware !!!!
+// All this is to support a 303 redirect to js.map files when debugging, so we don't have to embed in our firmware !!!!
+#ifndef STRINGIFY
 #define STRINGIFY_HELPER(x) #x
 #define STRINGIFY(x) STRINGIFY_HELPER(x)
+#endif
 // If not building in main github repo, then add -D GITUSER=your_userid to the compile line (no quotes, STRINGIFY adds that here)
 #ifndef GITUSER
 #define _GITUSER "ratgdo"
@@ -325,31 +325,50 @@ void web_loop()
         ESP_LOGI(TAG, "Current Door State changing from %s to %s", DOOR_STATE(lastDoorState), DOOR_STATE(garage_door.current_state));
         if (enableNTP && clockSet)
         {
+            time_t timeNow = time(NULL);
             if (lastDoorState == 0xff)
             {
                 // initialize with saved time.
                 // lastDoorUpdateAt is milliseconds relative to system reboot time.
-                lastDoorUpdateAt = (userConfig->getDoorUpdateAt() != 0) ? ((userConfig->getDoorUpdateAt() - time(NULL)) * 1000) + upTime : 0;
+                lastDoorUpdateAt = (userConfig->getDoorUpdateAt() != 0) ? ((userConfig->getDoorUpdateAt() - timeNow) * 1000) + upTime : 0;
+                lastDoorOpenAt = (userConfig->getDoorOpenAt() != 0) ? ((userConfig->getDoorOpenAt() - timeNow) * 1000) + upTime : 0;
+                lastDoorCloseAt = (userConfig->getDoorCloseAt() != 0) ? ((userConfig->getDoorCloseAt() - timeNow) * 1000) + upTime : 0;
             }
             else
             {
                 // first state change after a reboot, so really is a state change.
-                userConfig->set(cfg_doorUpdateAt, (int)time(NULL));
-                ESP8266_SAVE_CONFIG();
                 lastDoorUpdateAt = upTime;
+                userConfig->set(cfg_doorUpdateAt, (int)timeNow);
+                if (garage_door.current_state == GarageDoorCurrentState::CURR_OPEN)
+                {
+                    lastDoorOpenAt = upTime;
+                    userConfig->set(cfg_doorOpenAt, (int)timeNow);
+                }
+                if (garage_door.current_state == GarageDoorCurrentState::CURR_CLOSED)
+                {
+                    lastDoorCloseAt = upTime;
+                    userConfig->set(cfg_doorCloseAt, (int)timeNow);
+                }
+                ESP8266_SAVE_CONFIG();
             }
         }
         else
         {
+            // No realtime set, use upTime.
             lastDoorUpdateAt = (lastDoorState == 0xff) ? 0 : upTime;
+            if (garage_door.current_state == GarageDoorCurrentState::CURR_OPEN)
+                lastDoorOpenAt = lastDoorUpdateAt;
+            if (garage_door.current_state == GarageDoorCurrentState::CURR_CLOSED)
+                lastDoorCloseAt = lastDoorUpdateAt;
         }
-        // if no NTP....  lastDoorUpdateAt = (lastDoorState == 0xff) ? 0 : upTime;
         lastDoorState = garage_door.current_state;
         // We send milliseconds relative to current time... ie updated X milliseconds ago
         // First time through, zero offset from upTime, which is when we last rebooted)
-        JSON_ADD_INT("lastDoorUpdateAt", (upTime - lastDoorUpdateAt));
+        JSON_ADD_INT(cfg_doorUpdateAt, (upTime - lastDoorUpdateAt));
+        JSON_ADD_INT(cfg_doorOpenAt, (upTime - lastDoorOpenAt));
+        JSON_ADD_INT(cfg_doorCloseAt, (upTime - lastDoorCloseAt));
     }
-#ifndef ESP8266
+#ifdef RATGDO32_DISCO
     // Feature not available on ESP8266
     if (garage_door.has_distance_sensor)
     {
@@ -461,16 +480,9 @@ void setup_web()
              motionTriggers.bit.lockKey,
              motionTriggers.asInt);
     lastDoorUpdateAt = 0;
+    lastDoorOpenAt = 0;
+    lastDoorCloseAt = 0;
     lastDoorState = (GarageDoorCurrentState)0xff;
-
-#ifdef ESP8266 // ESP8266 only
-    crashCount = saveCrash.count();
-    if (crashCount == 255)
-    {
-        saveCrash.clear();
-        crashCount = 0;
-    }
-#endif
 
     ESP_LOGI(TAG, "Registering URI handlers");
     server.on("/update", HTTP_POST, handle_update, handle_firmware_upload);
@@ -763,7 +775,9 @@ void handle_status()
     JSON_ADD_INT(cfg_motionTriggers, (uint32_t)motionTriggers.asInt);
     JSON_ADD_INT(cfg_LEDidle, userConfig->getLEDidle());
     // We send milliseconds relative to current time... ie updated X milliseconds ago
-    JSON_ADD_INT("lastDoorUpdateAt", (upTime - lastDoorUpdateAt));
+    JSON_ADD_INT(cfg_doorUpdateAt, (upTime - lastDoorUpdateAt));
+    JSON_ADD_INT(cfg_doorOpenAt, (upTime - lastDoorOpenAt));
+    JSON_ADD_INT(cfg_doorCloseAt, (upTime - lastDoorCloseAt));
     JSON_ADD_BOOL("enableNTP", enableNTP);
     if (enableNTP && (bool)clockSet)
     {
@@ -803,6 +817,7 @@ void handle_status()
 #ifdef USE_GDOLIB
     JSON_ADD_BOOL(cfg_useSWserial, userConfig->getUseSWserial());
 #endif
+#ifdef RATGDO32_DISCO
     JSON_ADD_BOOL("distanceSensor", garage_door.has_distance_sensor);
     if (garage_door.has_distance_sensor)
     {
@@ -816,6 +831,7 @@ void handle_status()
     JSON_ADD_BOOL(cfg_laserEnabled, userConfig->getLaserEnabled());
     JSON_ADD_BOOL(cfg_laserHomeKit, userConfig->getLaserHomeKit());
     JSON_ADD_INT(cfg_assistDuration, userConfig->getAssistDuration());
+#endif
     JSON_ADD_BOOL(cfg_homespanCLI, userConfig->getEnableHomeSpanCLI());
 #endif
     JSON_ADD_INT("webRequests", request_count);
@@ -962,7 +978,7 @@ bool helperFactoryReset(const std::string &key, const char *value, configSetting
     return true;
 }
 
-#ifndef ESP8266
+#ifdef RATGDO32_DISCO
 bool helperAssistLaser(const std::string &key, const char *value, configSetting *action)
 {
     if (atoi(value) == 1)
@@ -986,7 +1002,7 @@ void handle_setgdo()
         {"credentials", {false, false, 0, helperCredentials}}, // parse out wwwUsername and credentials
         {"updateUnderway", {false, false, 0, helperUpdateUnderway}},
         {"factoryReset", {true, false, 0, helperFactoryReset}},
-#ifndef ESP8266
+#ifdef RATGDO32_DISCO
         {"assistLaser", {false, false, 0, helperAssistLaser}},
 #endif
     };
@@ -1086,7 +1102,7 @@ void removeSSEsubscription(SSESubscription *s)
     if (subscriptionCount > 0)
         subscriptionCount--; // Prevent negative count
     s->heartbeatTimer.detach();
-    ESP_LOGI(TAG, "Client %s (%s) not listening, remove SSE subscription. Total: %d", s->clientIP.toString().c_str(), s->clientUUID.c_str(), subscriptionCount);
+    ESP_LOGI(TAG, "Remove SSE subscription. Total subscribed: %d", subscriptionCount);
     s->client.stop();
     s->clientIP = INADDR_NONE;
     s->clientUUID.clear();
@@ -1107,6 +1123,7 @@ void SSEheartbeat(SSESubscription *s)
         {
             // 5 heartbeats have failed... assume client will not connect
             // and free up the slot
+            ESP_LOGI(TAG, "Client %s (%s) >5 heartbeat fails, remove SSE subscription", s->clientIP.toString().c_str(), s->clientUUID.c_str());
             removeSSEsubscription(s);
         }
         else
@@ -1126,7 +1143,7 @@ void SSEheartbeat(SSESubscription *s)
         JSON_ADD_INT("freeHeap", free_heap);
         JSON_ADD_INT("minHeap", min_heap);
         // TODO monitor stack... JSON_ADD_INT("minStack", ESP.getFreeContStack());
-#ifndef ESP8266
+#ifdef RATGDO32_DISCO
         static int32_t lastVehicleDistance = 0;
         if (garage_door.has_distance_sensor && (lastVehicleDistance != vehicleDistance))
         {
@@ -1157,6 +1174,7 @@ void SSEheartbeat(SSESubscription *s)
     }
     else
     {
+        ESP_LOGI(TAG, "Client %s (%s) not listening (heartbeat), remove SSE subscription", s->clientIP.toString().c_str(), s->clientUUID.c_str());
         removeSSEsubscription(s);
         YIELD();
     }
@@ -1255,18 +1273,19 @@ void handle_subscribe()
     {
         if (subscription[channel].clientUUID == server.arg(id))
         {
-            foundExisting = true;
             if (subscription[channel].SSEconnected)
             {
                 // Already connected.  We need to close it down as client will be reconnecting
                 ESP_LOGI(TAG, "Client %s (%s) already connected on channel %d, remove SSE subscription", clientIP.toString().c_str(), server.arg(id).c_str(), channel);
                 removeSSEsubscription(&subscription[channel]);
+                break; // without setting foundExisting... so we create new instance.
             }
             else
             {
                 // Subscribed but not connected yet, so nothing to close down.
                 ESP_LOGI(TAG, "Client %s (%s) already subscribed for SSE but not connected on channel %d", clientIP.toString().c_str(), server.arg(id).c_str(), channel);
             }
+            foundExisting = true;
             break;
         }
     }
@@ -1339,22 +1358,7 @@ void handle_subscribe()
 void handle_crashlog()
 {
     server.client().print(response200);
-#ifdef ESP8266
-    // We save data from crash EEPROM into a temp file so when we send to the
-    // browser client we chunk it in smaller pieces.  This improves reliability
-    // on slow network links avoiding watchdog timeouts
-    constexpr char CRASH_TEMP_FILE[] = "/crash_temp";
-    File crashTempFile = LittleFS.open(CRASH_TEMP_FILE, "w");
-    crashTempFile.truncate(0);
-    crashTempFile.seek(0, fs::SeekSet);
-    saveCrash.print(crashTempFile);
-    ratgdoLogger->printSavedLog(crashTempFile);
-    crashTempFile.close();
-    if (crashCount > 0)
-        ratgdoLogger->printSavedLog(server.client());
-#else
     ratgdoLogger->printCrashLog(server.client());
-#endif
 }
 
 void handle_showlog()
@@ -1379,12 +1383,7 @@ void handle_clearcrashlog()
 {
     AUTHENTICATE();
     ESP_LOGI(TAG, "Clear saved crash log");
-#ifdef ESP8266
-    saveCrash.clear();
-#else
-    esp_core_dump_image_erase();
-#endif
-    crashCount = 0;
+    ratgdoLogger->clearCrashLog();
     server.send_P(200, type_txt, PSTR("Crash log cleared\n"));
 }
 
@@ -1468,6 +1467,7 @@ void SSEBroadcastState(const char *data, BroadcastType type)
             else
             {
                 // Client connection has gone.  Remove from our subscribed client list
+                ESP_LOGI(TAG, "Client %s (%s) not listening (broadcast), remove SSE subscription", subscription[i].clientIP.toString().c_str(), subscription[i].clientUUID.c_str());
                 removeSSEsubscription(&subscription[i]);
             }
         }

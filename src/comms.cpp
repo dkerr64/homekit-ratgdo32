@@ -25,23 +25,19 @@
 #include "comms.h"
 #include "led.h"
 
-#ifdef ESP32
 #ifdef USE_GDOLIB
 #include "gdo.h"
 #else // USE_GDOLIB
 #include "SoftwareSerial.h"
-#include "../lib/ratgdo/Packet.h"
-#include "../lib/ratgdo/Reader.h"
-#include "../lib/ratgdo/secplus2.h"
-#include "drycontact.h"
-#endif // USE_GDOLIB
-#else  // ESP32
-#include "SoftwareSerial.h"
 #include "Reader.h"
 #include "secplus2.h"
 #include "Packet.h"
+#include "drycontact.h"
+#endif // USE_GDOLIB
+
+#ifdef ESP8266
 #include "cQueue.h"
-#endif // ESP32
+#endif // ESP8266
 
 static const char *TAG = "ratgdo-comms";
 
@@ -197,7 +193,7 @@ bool clearToSend = false;
 bool wallPanelBooting = false;
 bool wallPanelDetected = false;
 #ifdef SEC1_DISCONNECT_WP
-#define WP_CONNECTED    LOW
+#define WP_CONNECTED LOW
 #define WP_DISCONNECTED HIGH
 uint8_t wallPanelConnected;
 #endif
@@ -236,7 +232,7 @@ enum secplus1Codes : uint8_t
     Unknown = 0xFF // (when rx fails parity test)
 };
 
-// protoypes
+// prototypes
 void sync();
 bool process_PacketAction(PacketAction &pkt_ac);
 void door_command(DoorAction action);
@@ -419,8 +415,8 @@ void setup_comms()
         ESP_LOGI(TAG, "=== Setting up comms for SECURITY+1.0 protocol");
 
 #ifdef SEC1_DISCONNECT_WP
-        // GPIO16 - D0
-        // ⁡⁢⁣⁢NC RELAY (AQY412)⁡
+        // ESP32:GPIO_NUM_26 - ESP8266:GPIO_NUM16(D0)
+        // NC RELAY (AQY412)
         // enable wall panel
         wallPanelConnected = WP_CONNECTED;
         digitalWrite(STATUS_DOOR_PIN, wallPanelConnected);
@@ -927,7 +923,7 @@ void sec1_process_message(uint8_t key, uint8_t value)
         // 0x0X = moving
         // upper nibble should be 0x5 or 0x0 (DK reported 0x1)
         // sec+1 doors sometimes report wrong door status
-        // back to origional code, MJS 8/14/2025 confirmed logging
+        // back to original code, MJS 8/14/2025 confirmed logging
         // it could report a valid byte but its not really valid
         // ie: opening when its already open
         static uint8_t prevDoor = 0xFF; // Initialize to invalid value
@@ -1035,7 +1031,7 @@ void sec1_process_message(uint8_t key, uint8_t value)
     // light & lock
     case secplus1Codes::LightLockStatus:
     {
-        // only use for real sec1 commm debugging, its just too chatty
+        // only use for real sec1 comms debugging, its just too chatty
         // ESP_LOGD(TAG, "SEC1 RX 0x3A value: 0x%02X", value);
 
         // upper nibble should be 0x5 or 0x1
@@ -1103,7 +1099,7 @@ void comms_loop_sec1()
     static uint8_t syncByteCount;
 
     // CTS timer
-    // when wall panel present, need 5ms elasped after last complete message arrives.
+    // when wall panel present, need 5ms elapsed after last complete message arrives.
     // if one arrives before that (ie multiple in rx buffers, the msg_complete time stamp is reset)
     if (!clearToSend)
     {
@@ -1171,7 +1167,7 @@ void comms_loop_sec1()
         // poll byte
         else if (ser_byte >= 0x38 && ser_byte <= 0x3A)
         {
-            // if we already waiting for a GDO reponse, and got a new poll...
+            // if we already waiting for a GDO response, and got a new poll...
             if (reading_msg)
             {
                 ESP_LOGD(TAG, "SEC1 RX Prior poll msg incomplete [0x%02X] received, but lost GDO response", rx_packet[0]);
@@ -1179,12 +1175,12 @@ void comms_loop_sec1()
 
             rx_packet[0] = ser_byte;
 
-            // timestamp beinging of message
+            // timestamp begining of message
             msg_start = _millis();
 
             reading_msg = true;
         }
-        // GDO reponse byte to poll
+        // GDO response byte to poll
         else if (reading_msg)
         {
             // we only allow 2 bytes max, and the reading_msg controls that
@@ -1262,6 +1258,8 @@ void comms_loop_sec1()
 #endif
                 if (process_PacketAction(pkt_ac))
                 {
+                    // success, reset retry count
+                    retryCount = 0;
 #ifdef ESP8266
                     q_drop(&pkt_q);
 #endif
@@ -1270,7 +1268,7 @@ void comms_loop_sec1()
                 {
                     if (retryCount++ < MAX_COMMS_RETRY)
                     {
-                        ESP_LOGD(TAG, "SEC1 TX send failed, will retry");
+                        ESP_LOGD(TAG, "SEC1 TX send failed, will retry. retryCount=%d", retryCount);
 #ifdef ESP32
                         xQueueSendToFront(pkt_q, &pkt_ac, 0); // ignore errors
 #endif
@@ -1340,12 +1338,14 @@ void comms_loop_sec2()
 #endif
                 }
             }
-#ifdef ESP8266
             else
             {
+                // success, reset retry count
+                retryCount = 0;
+#ifdef ESP8266
                 q_drop(&pkt_q);
-            }
 #endif
+            }
         }
     }
     else
@@ -2196,7 +2196,7 @@ void TTCtimerFn(void (*callback)(), bool light)
                 }
             }
         }
-#ifdef ESP32
+#ifdef RATGDO32_DISCO
         tone(BEEPER_PIN, 1300, 125);
 #endif
         TTCiterations--;
