@@ -416,7 +416,7 @@ void setup_comms()
 
 #ifdef SEC1_DISCONNECT_WP
         // ESP32:GPIO_NUM_26 - ESP8266:GPIO_NUM16(D0)
-        // NC REALY (AQY412)
+        // ⁡⁢⁣⁢NC RELAY (AQY412)⁡
         // enable wall panel
         wallPanelConnected = WP_CONNECTED;
         digitalWrite(STATUS_DOOR_PIN, wallPanelConnected);
@@ -1716,6 +1716,7 @@ void comms_loop()
 bool transmitSec1(byte toSend)
 {
     bool noSend = false;
+    bool success = false;
 
     // safety #1
     if (sw_serial.available())
@@ -1765,17 +1766,47 @@ bool transmitSec1(byte toSend)
     // aprox 10ms to write byte
     sw_serial.write(toSend);
 
+    _millis_t before = _millis();
+    while (!sw_serial.available())
+    {
+        if ((_millis() - before) >= 20)
+        {
+            ESP_LOGD(TAG, "SEC1 TX ECHO TIMEDOUT");
+            break;
+        }
+
+        yield();
+    };
+
+    success = true;
+
     // use this to "confirm" tx byte
     if (!poll_cmd)
     {
         // read off echo, it is ready right after the write()
         int echoByte = sw_serial.read();
         if (echoByte == -1)
+        {
+            // LOST THE BYTE COMPLETELY
             ESP_LOGD(TAG, "SEC1 TX LOST ECHO OF: 0x%02X", toSend);
-        else if (echoByte != toSend)
-            ESP_LOGD(TAG, "SEC1 TX MISMATCH ECHO OF: tx:0x%02X rx:0x%02X", toSend, echoByte);
+
+            //success = false;
+        }
         else
-            ESP_LOGV(TAG, "SEC1 TX: 0x%02X", echoByte);
+        {
+            // did the received byte match the sent?
+            if (echoByte != toSend)
+            {
+                ESP_LOGD(TAG, "SEC1 TX MISMATCH ECHO OF: tx:0x%02X rx:0x%02X", toSend, echoByte);
+
+                success = false;
+            }
+            else
+            {
+                // GOOD ECHO
+                ESP_LOGV(TAG, "SEC1 TX ECHO OF: 0x%02X", echoByte);
+            }
+        }
     }
 
     // timestamp tx
@@ -1799,7 +1830,7 @@ bool transmitSec1(byte toSend)
 #endif
     }
 
-    return true;
+    return success;
 }
 
 /**************************** CONTROLLER CODE *******************************
