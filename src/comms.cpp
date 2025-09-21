@@ -1765,18 +1765,12 @@ bool transmitSec1(byte toSend)
 
     // aprox 10ms to write byte
     sw_serial.write(toSend);
-
-    _millis_t before = _millis();
-    while (!sw_serial.available())
+    if (!sw_serial.available())
     {
-        if ((_millis() - before) >= 20)
-        {
-            ESP_LOGD(TAG, "SEC1 TX ECHO TIMEDOUT");
-            break;
-        }
-
-        yield();
-    };
+        sw_serial.flush();
+        ESP_LOGD(TAG, "+");
+    }
+    
 
     success = true;
 
