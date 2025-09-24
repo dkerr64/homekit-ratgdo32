@@ -18,6 +18,8 @@
 
 #define FLASH_MS 500 // default flash period, 500ms
 #define FLASH_ACTIVITY_MS 250
+#define BLINK_ON_MS 1000
+#define BLINK_OFF_MS 5000
 
 class LED
 {
@@ -29,6 +31,10 @@ private:
     uint8_t idleState = 0; // opposite of active
     uint8_t currentState = 0;
     Ticker LEDtimer;
+    uint64_t onTime;
+    uint64_t offTime;
+    Ticker LEDBlinkTicker;
+    void heartbeatCallback();
 
 public:
     explicit LED(uint8_t gpio_num, uint8_t state = 1);
@@ -39,6 +45,8 @@ public:
     void flash(uint64_t ms = FLASH_MS);
     void setIdleState(uint8_t state);
     uint8_t getIdleState() { return idleState; };
+    void heartbeatStart(uint64_t onTimeMS = BLINK_ON_MS, uint64_t offTimeMS = BLINK_OFF_MS);
+    void heartbeatStop();
 };
 
 extern LED led;

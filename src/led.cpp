@@ -54,12 +54,20 @@ void LED::idle()
 
 void LED::setIdleState(uint8_t state)
 {
+    heartbeatStop();
+
     // 0 = LED flashes on (off when idle)
     // 1 = LED flashes off (on when idle)
     // 2 = LED disabled (active and idle both off)
+    // 3 = LED heartbeat (1s on, 5s off)
     if (state == 2)
     {
+        // set all to 0 (off)
         idleState = activeState = offState;
+    }
+    if (state == 3)
+    {
+        heartbeatStart();
     }
     else
     {
@@ -68,7 +76,6 @@ void LED::setIdleState(uint8_t state)
         activeState = (idleState == 1) ? 0 : 1;
     }
 }
-
 
 void LED::flash(uint64_t ms)
 {
@@ -80,4 +87,34 @@ void LED::flash(uint64_t ms)
         LEDtimer.once_ms(ms, [this]()
                          { this->idle(); });
     }
+}
+
+void LED::heartbeatCallback()
+{
+    if (currentState == onState)
+    {
+        off();
+        LEDBlinkTicker.once_ms(offTime, [this]()
+                     { this->heartbeatCallback(); });
+    }
+    else
+    {
+        on();
+        LEDBlinkTicker.once_ms(onTime, [this]()
+                     { this->heartbeatCallback(); });
+    }
+}
+
+void LED::heartbeatStart(uint64_t onTimeMS, uint64_t offTimeMS)
+{
+    onTime = onTimeMS;
+    offTime = offTimeMS;
+    LEDBlinkTicker.once_ms(onTimeMS, [this]()
+                     { this->heartbeatCallback(); });
+}
+
+void LED::heartbeatStop()
+{
+    LEDBlinkTicker.detach();
+    off();
 }

@@ -289,6 +289,7 @@ function setElementsFromStatus(status) {
                 document.getElementById("LEDidle0").checked = (value == 0) ? true : false;
                 document.getElementById("LEDidle1").checked = (value == 1) ? true : false;
                 document.getElementById("LEDidle2").checked = (value == 2) ? true : false;
+                document.getElementById("LEDidle3").checked = (value == 3) ? true : false;
                 break;
             case "rebootSeconds":
                 document.getElementById("rebootHours").value = value / 60 / 60;
@@ -1063,8 +1064,9 @@ async function saveSettings() {
     if (isNaN(occupancyDuration)) occupancyDuration = 0;
     occupancyDuration = ((occupancyDuration <= 10) ? occupancyDuration : (occupancyDuration <= 32) ? ((occupancyDuration - 10) * 5) + 10 : 0) * 60; // convert mins to secs
 
-    const LEDidle = (document.getElementById("LEDidle2").checked) ? 2
-        : (document.getElementById("LEDidle1").checked) ? 1 : 0;
+    const LEDidle = (document.getElementById("LEDidle3").checked) ? 3
+        : (document.getElementById("LEDidle2").checked) ? 2
+            : (document.getElementById("LEDidle1").checked) ? 1 : 0;
     let rebootHours = Math.max(Math.min(parseInt(document.getElementById("rebootHours").value), 72), 0);
     if (isNaN(rebootHours)) rebootHours = 0;
     let newDeviceName = document.getElementById("newDeviceName").value.substring(0, 30).trim();
