@@ -74,6 +74,9 @@ _millis_t comms_status_start = 0;
 
 uint32_t doorControlType = 0;
 
+static bool is_0x37_panel = false;
+static bool door_moving = false;
+
 // For Time-to-close control
 static const uint32_t TTCinterval = 250;
 static uint32_t TTCiterations = 0;
@@ -221,7 +224,7 @@ enum secplus1Codes : uint8_t
     LockButtonRelease = 0x35,
 
     Unknown_0x36 = 0x36,
-    Unknown_0x37 = 0x37,
+    QueryDoorStatus_0x37 = 0x37,
 
     DoorStatus = 0x38,
     ObstructionStatus = 0x39,
@@ -913,6 +916,28 @@ void sec1_process_message(uint8_t key, uint8_t value)
         break;
     }
 
+    case secplus1Codes::QueryDoorStatus_0x37:
+    {
+        is_0x37_panel = true;
+        if (false)
+        {
+            // TODO, peek queue looking for TOGGLE_LOCK_PRESS
+            // If yes then process it instead of sending door status request.
+        }
+        else
+        {
+            static _millis_t last_status_query = 0;
+            if (door_moving || (_millis() - last_status_query > 10000))
+            {
+                ESP_LOGD(TAG, "Received a 0x37, send a 0x38 door status request");
+                // no more frequently than once every 10 seconds, inject door status request
+                transmitSec1(secplus1Codes::DoorStatus);
+                last_status_query = _millis();
+            }
+        }
+        break;
+    }
+
     // door status
     case secplus1Codes::DoorStatus:
     {
@@ -924,7 +949,7 @@ void sec1_process_message(uint8_t key, uint8_t value)
         // it could report a valid byte but its not really valid
         // ie: opening when its already open
         static uint8_t prevDoor = 0xFF; // Initialize to invalid value
-        if (prevDoor != value)
+        if (prevDoor != value && !is_0x37_panel)
         {
             prevDoor = value;
             break;
@@ -949,6 +974,7 @@ void sec1_process_message(uint8_t key, uint8_t value)
                 break;
             }
             current_state = GarageDoorCurrentState::CURR_STOPPED;
+            door_moving = false;
             break;
         case 0x01:
             if (garage_door.current_state == CURR_OPEN)
@@ -960,6 +986,7 @@ void sec1_process_message(uint8_t key, uint8_t value)
             break;
         case 0x02:
             current_state = GarageDoorCurrentState::CURR_OPEN;
+            door_moving = false;
             break;
         // no 0x03 known
         case 0x04:
@@ -972,6 +999,7 @@ void sec1_process_message(uint8_t key, uint8_t value)
             break;
         case 0x05:
             current_state = GarageDoorCurrentState::CURR_CLOSED;
+            door_moving = false;
             break;
         case 0x06:
             if (garage_door.current_state == CURR_CLOSED || garage_door.current_state == CURR_OPEN)
@@ -980,6 +1008,7 @@ void sec1_process_message(uint8_t key, uint8_t value)
                 break;
             }
             current_state = GarageDoorCurrentState::CURR_STOPPED;
+            door_moving = false;
             break;
         default:
             ESP_LOGE(TAG, "SEC1 RX Got unknown \"value\" for door state");
@@ -1035,7 +1064,7 @@ void sec1_process_message(uint8_t key, uint8_t value)
         // make sure 2 same in a row
         // MJS 8/14/2025 during logging observed this situation
         static uint8_t prevLightLock = 0xFF; // Initialize to invalid value
-        if (value != prevLightLock)
+        if (value != prevLightLock && !is_0x37_panel)
         {
             prevLightLock = value;
             break;
@@ -2047,6 +2076,7 @@ void door_command(DoorAction action)
             ESP_LOGE(TAG, "packet queue full, dropping door command pressed pkt");
         }
 
+        door_moving = true;
         // do button release
         pkt_ac.pkt.m_data.value.door_action.pressed = false;
         pkt_ac.inc_counter = true;
@@ -2070,6 +2100,7 @@ void door_command(DoorAction action)
             {
                 ESP_LOGE(TAG, "packet queue full, dropping door command release pkt");
             }
+            sec1_poll_status(secplus1Codes::DoorStatus);
         }
         send_get_status();
     }
