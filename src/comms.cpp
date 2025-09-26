@@ -224,13 +224,13 @@ enum secplus1Codes : uint8_t
     LockButtonRelease = 0x35,
 
     Unknown_0x36 = 0x36,
-    QueryDoorStatus_0x37 = 0x37,
+    QueryDoorStatus_0x37 = 0x37, // sent by a "0x37" wall panel
 
     DoorStatus = 0x38,
     ObstructionStatus = 0x39,
     LightLockStatus = 0x3A,
-
-    Unknown_0x53 = 0x53, // sent by WP when done its "power up"
+    Unknown_0x40 = 0x40, // sent by a "0x37" wall panel
+    Unknown_0x53 = 0x53, // sent by a "0x37" wall panel and WP when done its "power up"
 
     Unknown = 0xFF // (when rx fails parity test)
 };
@@ -850,7 +850,7 @@ void update_door_state(GarageDoorCurrentState current_state)
     doorState = current_state;
 }
 
-void sec1_process_message(uint8_t key, uint8_t value)
+void sec1_process_message(uint8_t key, uint8_t value = 0xFF)
 {
     if (value == 0xFF)
     {
@@ -918,7 +918,6 @@ void sec1_process_message(uint8_t key, uint8_t value)
 
     case secplus1Codes::QueryDoorStatus_0x37:
     {
-        is_0x37_panel = true;
         if (false)
         {
             // TODO, peek queue looking for TOGGLE_LOCK_PRESS
@@ -931,8 +930,10 @@ void sec1_process_message(uint8_t key, uint8_t value)
             {
                 ESP_LOGD(TAG, "Received a 0x37, send a 0x38 door status request");
                 // no more frequently than once every 10 seconds, inject door status request
-                if (transmitSec1(secplus1Codes::DoorStatus))
-                    last_status_query = _millis();
+                // Write directly rather than go through all checking done by transmitSec1()
+                sw_serial.write(secplus1Codes::DoorStatus);
+                // timestamp tx
+                last_tx = last_status_query = _millis();
             }
         }
         break;
@@ -1177,54 +1178,71 @@ void comms_loop_sec1()
             continue;
         }
 
+        if (ser_byte == secplus1Codes::QueryDoorStatus_0x37 && !is_0x37_panel && !reading_msg)
+        {
+            // An older digital wall panel that send different sequence of codes
+            is_0x37_panel = true;
+            ESP_LOGI(TAG, "Detected a 0x37 digital wall panel");
+        }
+
         // upper nibble always 0x3 for press/release/poll bytes (0x30 - 0x3A)
         // no GDO response has upper nibble 0x3, and its validated in sec1_process_message()
         // if a byte comes in as 0x3x even if reading 2 byte message, start over
-
-        // press/release byte
-        if (ser_byte >= 0x30 && ser_byte <= 0x37)
+        switch (ser_byte)
         {
-            // only 1 byte, 0xFF is dummy data
-            sec1_process_message(ser_byte, 0xFF);
-
+        case secplus1Codes::DoorButtonPress:
+        case secplus1Codes::DoorButtonRelease:
+        case secplus1Codes::LightButtonPress:
+        case secplus1Codes::LightButtonRelease:
+        case secplus1Codes::LockButtonPress:
+        case secplus1Codes::LockButtonRelease:
+        {
+            sec1_process_message(ser_byte);
             // reset start of message
             reading_msg = false;
+            break;
         }
-        // poll byte
-        else if (ser_byte >= 0x38 && ser_byte <= 0x3A)
+        case secplus1Codes::QueryDoorStatus_0x37:
+        case secplus1Codes::Unknown_0x40:
+        case secplus1Codes::Unknown_0x53:
+            if (!is_0x37_panel)
+                break;
+            // else fall through
+        case secplus1Codes::DoorStatus:
+        case secplus1Codes::ObstructionStatus:
+        case secplus1Codes::LightLockStatus:
         {
             // if we already waiting for a GDO response, and got a new poll...
             if (reading_msg)
             {
                 ESP_LOGD(TAG, "SEC1 RX Prior poll msg incomplete [0x%02X] received, but lost GDO response", rx_packet[0]);
             }
-
             rx_packet[0] = ser_byte;
-
             // timestamp begining of message
             msg_start = _millis();
-
             reading_msg = true;
+            break;
         }
-        // GDO response byte to poll
-        else if (reading_msg)
+        default:
         {
-            // we only allow 2 bytes max, and the reading_msg controls that
-            // this is the value to response of the GDO query
-            rx_packet[1] = ser_byte;
-
-            sec1_process_message(rx_packet[0], rx_packet[1]);
-
-            // time stamp
-            msg_complete = _millis();
-
-            // reset start of message
-            reading_msg = false;
+            if (reading_msg)
+            {
+                // we only allow 2 bytes max, and the reading_msg controls that
+                // this is the value to response of the GDO query
+                rx_packet[1] = ser_byte;
+                sec1_process_message(rx_packet[0], rx_packet[1]);
+                // time stamp
+                msg_complete = _millis();
+                // reset start of message
+                reading_msg = false;
+            }
+            else
+            {
+                ESP_LOGD(TAG, "SEC1 RX invalid cmd byte 0x%02X", ser_byte);
+            }
+            break;
         }
-        else
-        {
-            ESP_LOGD(TAG, "SEC1 RX invalid cmd byte 0x%02X", ser_byte);
-        }
+        } // end of switch()
     }
 
     // if still reading the message in, no need to process further
@@ -1765,9 +1783,8 @@ bool transmitSec1(byte toSend)
     }
 
     // sending a poll?
-    bool poll_cmd = (toSend == 0x38) || (toSend == 0x39) || (toSend == 0x3A);
-    // if not a poll command (and polls only with wall panel emulation),
-    // disable disable rx (allows for cleaner tx, and no echo)
+    bool poll_cmd = (toSend == secplus1Codes::DoorStatus) || (toSend == secplus1Codes::ObstructionStatus) || (toSend == secplus1Codes::LightLockStatus);
+    // if not a poll command disable rx (allows for cleaner tx, and no echo)
     if (!poll_cmd)
     {
         // Use LED to signal activity
