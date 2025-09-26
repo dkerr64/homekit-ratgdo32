@@ -931,8 +931,8 @@ void sec1_process_message(uint8_t key, uint8_t value)
             {
                 ESP_LOGD(TAG, "Received a 0x37, send a 0x38 door status request");
                 // no more frequently than once every 10 seconds, inject door status request
-                transmitSec1(secplus1Codes::DoorStatus);
-                last_status_query = _millis();
+                if (transmitSec1(secplus1Codes::DoorStatus))
+                    last_status_query = _millis();
             }
         }
         break;
