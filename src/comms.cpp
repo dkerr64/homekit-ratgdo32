@@ -74,6 +74,9 @@ _millis_t comms_status_start = 0;
 
 uint32_t doorControlType = 0;
 
+static bool is_0x37_panel = false;
+static bool door_moving = false;
+
 // For Time-to-close control
 static const uint32_t TTCinterval = 250;
 static uint32_t TTCiterations = 0;
@@ -221,13 +224,13 @@ enum secplus1Codes : uint8_t
     LockButtonRelease = 0x35,
 
     Unknown_0x36 = 0x36,
-    Unknown_0x37 = 0x37,
+    QueryDoorStatus_0x37 = 0x37, // sent by a "0x37" wall panel
 
     DoorStatus = 0x38,
     ObstructionStatus = 0x39,
     LightLockStatus = 0x3A,
-
-    Unknown_0x53 = 0x53, // sent by WP when done its "power up"
+    Unknown_0x40 = 0x40, // sent by a "0x37" wall panel
+    Unknown_0x53 = 0x53, // sent by a "0x37" wall panel and WP when done its "power up"
 
     Unknown = 0xFF // (when rx fails parity test)
 };
@@ -847,7 +850,7 @@ void update_door_state(GarageDoorCurrentState current_state)
     doorState = current_state;
 }
 
-void sec1_process_message(uint8_t key, uint8_t value)
+void sec1_process_message(uint8_t key, uint8_t value = 0xFF)
 {
     if (value == 0xFF)
     {
@@ -913,6 +916,29 @@ void sec1_process_message(uint8_t key, uint8_t value)
         break;
     }
 
+    case secplus1Codes::QueryDoorStatus_0x37:
+    {
+        if (false)
+        {
+            // TODO, peek queue looking for TOGGLE_LOCK_PRESS
+            // If yes then process it instead of sending door status request.
+        }
+        else
+        {
+            static _millis_t last_status_query = 0;
+            if (door_moving || (_millis() - last_status_query > 10000))
+            {
+                ESP_LOGD(TAG, "Received a 0x37, send a 0x38 door status request");
+                // no more frequently than once every 10 seconds, inject door status request
+                // Write directly rather than go through all checking done by transmitSec1()
+                sw_serial.write(secplus1Codes::DoorStatus);
+                // timestamp tx
+                last_tx = last_status_query = _millis();
+            }
+        }
+        break;
+    }
+
     // door status
     case secplus1Codes::DoorStatus:
     {
@@ -924,7 +950,7 @@ void sec1_process_message(uint8_t key, uint8_t value)
         // it could report a valid byte but its not really valid
         // ie: opening when its already open
         static uint8_t prevDoor = 0xFF; // Initialize to invalid value
-        if (prevDoor != value)
+        if (prevDoor != value && !is_0x37_panel)
         {
             prevDoor = value;
             break;
@@ -949,6 +975,7 @@ void sec1_process_message(uint8_t key, uint8_t value)
                 break;
             }
             current_state = GarageDoorCurrentState::CURR_STOPPED;
+            door_moving = false;
             break;
         case 0x01:
             if (garage_door.current_state == CURR_OPEN)
@@ -960,6 +987,7 @@ void sec1_process_message(uint8_t key, uint8_t value)
             break;
         case 0x02:
             current_state = GarageDoorCurrentState::CURR_OPEN;
+            door_moving = false;
             break;
         // no 0x03 known
         case 0x04:
@@ -972,6 +1000,7 @@ void sec1_process_message(uint8_t key, uint8_t value)
             break;
         case 0x05:
             current_state = GarageDoorCurrentState::CURR_CLOSED;
+            door_moving = false;
             break;
         case 0x06:
             if (garage_door.current_state == CURR_CLOSED || garage_door.current_state == CURR_OPEN)
@@ -980,6 +1009,7 @@ void sec1_process_message(uint8_t key, uint8_t value)
                 break;
             }
             current_state = GarageDoorCurrentState::CURR_STOPPED;
+            door_moving = false;
             break;
         default:
             ESP_LOGE(TAG, "SEC1 RX Got unknown \"value\" for door state");
@@ -1035,7 +1065,7 @@ void sec1_process_message(uint8_t key, uint8_t value)
         // make sure 2 same in a row
         // MJS 8/14/2025 during logging observed this situation
         static uint8_t prevLightLock = 0xFF; // Initialize to invalid value
-        if (value != prevLightLock)
+        if (value != prevLightLock && !is_0x37_panel)
         {
             prevLightLock = value;
             break;
@@ -1148,54 +1178,71 @@ void comms_loop_sec1()
             continue;
         }
 
+        if (ser_byte == secplus1Codes::QueryDoorStatus_0x37 && !is_0x37_panel && !reading_msg)
+        {
+            // An older digital wall panel that send different sequence of codes
+            is_0x37_panel = true;
+            ESP_LOGI(TAG, "Detected a 0x37 digital wall panel");
+        }
+
         // upper nibble always 0x3 for press/release/poll bytes (0x30 - 0x3A)
         // no GDO response has upper nibble 0x3, and its validated in sec1_process_message()
         // if a byte comes in as 0x3x even if reading 2 byte message, start over
-
-        // press/release byte
-        if (ser_byte >= 0x30 && ser_byte <= 0x37)
+        switch (ser_byte)
         {
-            // only 1 byte, 0xFF is dummy data
-            sec1_process_message(ser_byte, 0xFF);
-
+        case secplus1Codes::DoorButtonPress:
+        case secplus1Codes::DoorButtonRelease:
+        case secplus1Codes::LightButtonPress:
+        case secplus1Codes::LightButtonRelease:
+        case secplus1Codes::LockButtonPress:
+        case secplus1Codes::LockButtonRelease:
+        {
+            sec1_process_message(ser_byte);
             // reset start of message
             reading_msg = false;
+            break;
         }
-        // poll byte
-        else if (ser_byte >= 0x38 && ser_byte <= 0x3A)
+        case secplus1Codes::QueryDoorStatus_0x37:
+        case secplus1Codes::Unknown_0x40:
+        case secplus1Codes::Unknown_0x53:
+            if (!is_0x37_panel)
+                break;
+            // else fall through
+        case secplus1Codes::DoorStatus:
+        case secplus1Codes::ObstructionStatus:
+        case secplus1Codes::LightLockStatus:
         {
             // if we already waiting for a GDO response, and got a new poll...
             if (reading_msg)
             {
                 ESP_LOGD(TAG, "SEC1 RX Prior poll msg incomplete [0x%02X] received, but lost GDO response", rx_packet[0]);
             }
-
             rx_packet[0] = ser_byte;
-
             // timestamp begining of message
             msg_start = _millis();
-
             reading_msg = true;
+            break;
         }
-        // GDO response byte to poll
-        else if (reading_msg)
+        default:
         {
-            // we only allow 2 bytes max, and the reading_msg controls that
-            // this is the value to response of the GDO query
-            rx_packet[1] = ser_byte;
-
-            sec1_process_message(rx_packet[0], rx_packet[1]);
-
-            // time stamp
-            msg_complete = _millis();
-
-            // reset start of message
-            reading_msg = false;
+            if (reading_msg)
+            {
+                // we only allow 2 bytes max, and the reading_msg controls that
+                // this is the value to response of the GDO query
+                rx_packet[1] = ser_byte;
+                sec1_process_message(rx_packet[0], rx_packet[1]);
+                // time stamp
+                msg_complete = _millis();
+                // reset start of message
+                reading_msg = false;
+            }
+            else
+            {
+                ESP_LOGD(TAG, "SEC1 RX invalid cmd byte 0x%02X", ser_byte);
+            }
+            break;
         }
-        else
-        {
-            ESP_LOGD(TAG, "SEC1 RX invalid cmd byte 0x%02X", ser_byte);
-        }
+        } // end of switch()
     }
 
     // if still reading the message in, no need to process further
@@ -1736,9 +1783,8 @@ bool transmitSec1(byte toSend)
     }
 
     // sending a poll?
-    bool poll_cmd = (toSend == 0x38) || (toSend == 0x39) || (toSend == 0x3A);
-    // if not a poll command (and polls only with wall panel emulation),
-    // disable disable rx (allows for cleaner tx, and no echo)
+    bool poll_cmd = (toSend == secplus1Codes::DoorStatus) || (toSend == secplus1Codes::ObstructionStatus) || (toSend == secplus1Codes::LightLockStatus);
+    // if not a poll command disable rx (allows for cleaner tx, and no echo)
     if (!poll_cmd)
     {
         // Use LED to signal activity
@@ -2047,6 +2093,7 @@ void door_command(DoorAction action)
             ESP_LOGE(TAG, "packet queue full, dropping door command pressed pkt");
         }
 
+        door_moving = true;
         // do button release
         pkt_ac.pkt.m_data.value.door_action.pressed = false;
         pkt_ac.inc_counter = true;
@@ -2070,6 +2117,7 @@ void door_command(DoorAction action)
             {
                 ESP_LOGE(TAG, "packet queue full, dropping door command release pkt");
             }
+            sec1_poll_status(secplus1Codes::DoorStatus);
         }
         send_get_status();
     }
