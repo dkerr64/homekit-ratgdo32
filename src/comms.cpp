@@ -206,9 +206,14 @@ uint8_t lockState;
 // it is used for emulation of wall panel
 // byte secplus1States[] = {0x35, 0x35, 0x35, 0x35, 0x33, 0x33, 0x53, 0x53, 0x38, 0x3A, 0x3A, 0x3A, 0x39, 0x38, 0x3A, 0x38, 0x3A, 0x39};
 // MJS: this is what MY 889LM exhibited when powered up (release of all buttons, and then polls)
+// MJS: 0x031 is sent while "charging" the wall panel, then releases of light/lock folled by 0x53,0x53
 // MJS: the 0x53, GDO responds with 0x01 (since we dont use it, seems OK to not sent to GDO)
-byte secplus1States[] = {0x35, 0x35, 0x33, 0x33, /*0x53, 0x53,*/ 0x38, 0x3A, 0x39, 0x3A};
-#define SECPLUS1_POLL_ITEMS 4 // items at end of secplus1States[]
+
+// byte secplus1States[] = {0x31, 0x31, 0x35, 0x35, 0x33, 0x33, /*0x53, 0x53,*/ 0x38, 0x3A, 0x39, 0x3A};
+// #define SECPLUS1_POLL_ITEMS 4 // items at end of secplus1States[]
+
+byte secplus1States[] = {0x31, 0x31, 0x35, 0x35, 0x33, 0x33, 0x53, 0x53,        0x40 };
+#define SECPLUS1_POLL_ITEMS 1 // items at end of secplus1States[]
 
 // values for SECURITY+1.0 communication
 enum secplus1Codes : uint8_t
@@ -226,6 +231,8 @@ enum secplus1Codes : uint8_t
     DoorStatus = 0x38,
     ObstructionStatus = 0x39,
     LightLockStatus = 0x3A,
+
+    DoorMovingStatus_x40 = 0x40, // !!! newly discovered BIT7 set = door moving
 
     Unknown_0x53 = 0x53, // sent by WP when done its "power up"
 
@@ -412,10 +419,14 @@ void setup_comms()
         ESP_LOGI(TAG, "=== Setting up comms for SECURITY+1.0 protocol");
 
 #ifdef SEC1_DISCONNECT_WP
-        // ESP32:GPIO_NUM_26 - ESP8266:GPIO_NUM16(D0)
-        // ⁡⁢⁣⁢NC RELAY (AQY412)⁡
-        // enable wall panel
+// ESP32:GPIO_NUM_26 - ESP8266:GPIO_NUM16(D0)
+// ⁡⁢⁣⁢NC RELAY (AQY412)⁡
+// enable wall panel
+#ifdef SEC1_NO_WP_FORCE_EMULATION
+        wallPanelConnected = WP_DISCONNECTED;
+#else
         wallPanelConnected = WP_CONNECTED;
+#endif
         digitalWrite(STATUS_DOOR_PIN, wallPanelConnected);
 #endif
 
@@ -913,6 +924,15 @@ void sec1_process_message(uint8_t key, uint8_t value)
         break;
     }
 
+    case secplus1Codes::Unknown_0x37:
+    case secplus1Codes::DoorMovingStatus_x40:
+    case secplus1Codes::Unknown_0x53:
+    {
+        ESP_LOGD(TAG, "SEC1 RX MSG: 0x%02X:0x%02X", key, value);
+
+        break;
+    }
+
     // door status
     case secplus1Codes::DoorStatus:
     {
@@ -1148,34 +1168,21 @@ void comms_loop_sec1()
             continue;
         }
 
+        // ESP_LOGD(TAG, "SEC1 RX byte: 0x%02X", ser_byte);
+        // continue;
+
         // upper nibble always 0x3 for press/release/poll bytes (0x30 - 0x3A)
         // no GDO response has upper nibble 0x3, and its validated in sec1_process_message()
         // if a byte comes in as 0x3x even if reading 2 byte message, start over
 
-        // press/release byte
-        if (ser_byte >= 0x30 && ser_byte <= 0x37)
+        // press/release byte 0x30/0x31, 0x32/0x33, 0x34/0x35
+        if (ser_byte >= secplus1Codes::DoorButtonPress && ser_byte <= secplus1Codes::LockButtonRelease)
         {
             // only 1 byte, 0xFF is dummy data
             sec1_process_message(ser_byte, 0xFF);
 
             // reset start of message
             reading_msg = false;
-        }
-        // poll byte
-        else if (ser_byte >= 0x38 && ser_byte <= 0x3A)
-        {
-            // if we already waiting for a GDO response, and got a new poll...
-            if (reading_msg)
-            {
-                ESP_LOGD(TAG, "SEC1 RX Prior poll msg incomplete [0x%02X] received, but lost GDO response", rx_packet[0]);
-            }
-
-            rx_packet[0] = ser_byte;
-
-            // timestamp begining of message
-            msg_start = _millis();
-
-            reading_msg = true;
         }
         // GDO response byte to poll
         else if (reading_msg)
@@ -1191,6 +1198,22 @@ void comms_loop_sec1()
 
             // reset start of message
             reading_msg = false;
+        }
+        // poll byte 0x37, 0x38, 0x39, 0x3a, 0x40, 0x53
+        else if ((ser_byte >= secplus1Codes::Unknown_0x37 && ser_byte <= secplus1Codes::DoorMovingStatus_x40) || ser_byte == secplus1Codes::Unknown_0x53)
+        {
+            // if we already waiting for a GDO response, and got a new poll...
+            if (reading_msg)
+            {
+                ESP_LOGD(TAG, "SEC1 RX Prior poll msg incomplete [0x%02X] received, but lost GDO response", rx_packet[0]);
+            }
+
+            rx_packet[0] = ser_byte;
+
+            // timestamp begining of message
+            msg_start = _millis();
+
+            reading_msg = true;
         }
         else
         {
@@ -1736,7 +1759,7 @@ bool transmitSec1(byte toSend)
     }
 
     // sending a poll?
-    bool poll_cmd = (toSend == 0x38) || (toSend == 0x39) || (toSend == 0x3A);
+    bool poll_cmd = (((toSend >= secplus1Codes::Unknown_0x37) && (toSend <= 0x40)) || (toSend == 0x53));
     // if not a poll command (and polls only with wall panel emulation),
     // disable disable rx (allows for cleaner tx, and no echo)
     if (!poll_cmd)
@@ -1805,7 +1828,11 @@ bool transmitSec1(byte toSend)
         if (isRxPending())
             sw_serial.flush();
 
+#ifdef SEC1_NO_WP_FORCE_EMULATION
+        wallPanelConnected = WP_DISCONNECTED;
+#else
         wallPanelConnected = WP_CONNECTED;
+#endif
         digitalWrite(STATUS_DOOR_PIN, wallPanelConnected);
 #endif
     }
