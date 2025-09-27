@@ -939,7 +939,8 @@ void sec1_process_message(uint8_t key, uint8_t value = 0xFF)
     {
         if (false)
         {
-            // TODO, peek queue looking for TOGGLE_LOCK_PRESS
+            // TODO
+            // ESPhome firmware will peek queue looking for TOGGLE_LOCK_PRESS
             // If yes then process it instead of sending door status request.
         }
         else
@@ -2023,7 +2024,12 @@ bool process_PacketAction(PacketAction &pkt_ac)
             if (pkt_ac.pkt.m_data.value.lock.pressed == true)
             {
                 // ESP_LOGI(TAG, "SEC1 TX sending LOCK button press");
-
+                if (is_0x37_panel && !garage_door.wallPanelEmulated)
+                {
+                    // TODO
+                    // ESPhome firmware does not sent lock button press here... it is deferred until
+                    // immediately after receiving the 0x37.  WHY??? No Idea.
+                }
                 success = transmitSec1(secplus1Codes::LockButtonPress);
                 if (success)
                 {
