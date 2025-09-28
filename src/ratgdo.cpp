@@ -181,21 +181,35 @@ void setup()
     {
         wifiConnectTimeout = _millis() + WIFI_CONNECT_TIMEOUT;
     }
+
+    // Start by initializing Improv for WiFi provisioning by serial port
 #ifdef ESP8266
-    // on ESP8266 we setup everything ourselves.
     setup_improv();
-    wifi_connect();
-    setup_comms();
-    setup_drycontact();
-    ESP_LOGI(TAG, "Free heap after setup: %d", ESP.getFreeHeap());
 #else
     if (userConfig->getEnableHomeSpanCLI())
         disable_improv();
     else
         setup_improv();
-    // on ESP32 the HomeSpan library has callbacks which we use to setup everything else.
+#endif
+
+    // Then initialize communication with the garage door and sensors
+    setup_comms();
+#ifdef RATGDO32_DISCO
+    setup_vehicle();
+#endif
+#ifndef USE_GDOLIB
+    setup_drycontact();
+#endif
+
+    // Finally initialize WiFi and HomeKit
+#ifdef ESP8266
+    // on ESP8266 we setup everything ourselves.
+    wifi_connect();
+#else
+    // on ESP32 the HomeSpan library handles WiFi and has callbacks which we use to setup everything else.
     setup_homekit();
 #endif
+    ESP_LOGI(TAG, "=== WAITING for IP address before continuing initialization");
     // led to idle mode
     led.idle();
 }
@@ -220,10 +234,20 @@ void loop()
 #ifdef ESP8266
         // On ESP8266 we handle WiFi and HomeKit ourselves.  On ESP32 it is done by HomeSpan
         setup_homekit();
+#endif
         // HTTP web server should be started after HomeKit because HomeKit initializes MDNS which we use in web setup
         setup_web();
-#endif
         setup_after_IP_done = true;
+        ESP_LOGI(TAG, "=== Initialization after IP address acquired complete");
+#ifdef RATGDO32_DISCO
+        // beep on completing startup.
+        static bool startupBeeped = false;
+        if (!startupBeeped)
+        {
+            tone(BEEPER_PIN, 2000, 500);
+            startupBeeped = true;
+        }
+#endif
     }
 
     comms_loop();
@@ -238,9 +262,7 @@ void loop()
 #ifdef RATGDO32_DISCO
     vehicle_loop();
 #endif
-    YIELD(); // Wrap web loop in yield's as handling web requests could be slow.
     web_loop();
-    YIELD();
     improv_loop();
     soft_ap_loop();
     service_timer_loop();
