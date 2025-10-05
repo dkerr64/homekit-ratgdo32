@@ -4,6 +4,21 @@
 
 All notable changes to `homekit-ratgdo32` will be documented in this file. This project tries to adhere to [Semantic Versioning](http://semver.org/).
 
+## v3.3.6 (2025-10-??)
+
+### What's Changed
+
+* Bugfix: HomeKit pairing failed with out-of-compliance error. https://github.com/ratgdo/homekit-ratgdo/issues/300
+* Bugfix: Change WiFi and MDNS hostname when user changes GDO name. https://github.com/ratgdo/homekit-ratgdo32/issues/93
+* Bugfix: Web wage status occasionally getting out-of-sync with actual light/lock/door state.
+* Bugfix: Door open/close duration calculation not handling cases where door reverses before reaching open/close state.
+* Other: Detect (but do not support) 0x37 wall panels like LiftMaster 398LM. https://github.com/ratgdo/homekit-ratgdo32/issues/95
+
+### Known Issues
+
+* Sec+ 1.0 doors with digital wall panel (e.g. 889LM) sometimes do not close after a time-to-close delay. Please watch your door to make sure it closes after TTC delay.
+* Sec+ 1.0 doors with "0x37" digital wall panel (e.g. 398LM) not working.  We now detect but will not support them.  Recommend replacing with 889LM panel.
+
 ## v3.3.5 (2025-09-28)
 
 ### What's Changed
