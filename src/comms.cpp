@@ -108,6 +108,7 @@ inline bool txQueuePop(PacketAction *pkt)
 }
 
 SoftwareSerial sw_serial;
+HardwareSerial hw_serial(2);
 #endif // not USE_GDOLIB
 
 #define SECPLUS1_DIGITAL_WALLPLATE_TIMEOUT 15000
@@ -466,8 +467,12 @@ void setup_comms()
         digitalWrite(STATUS_DOOR_PIN, wallPanelConnected);
         tx_minimum_delay = SECPLUS1_TX_MINIMUM_DELAY;
 
-        sw_serial.begin(1200, SWSERIAL_8E1, UART_RX_PIN, UART_TX_PIN, true, 32);
-        sw_serial.onReceive(receiveHandler);
+        sw_serial.begin(1200, SWSERIAL_8E1, -1, UART_TX_PIN, true, 32);
+        //sw_serial.onReceive(receiveHandler);
+
+        hw_serial.begin(1200, SERIAL_8E1, UART_RX_PIN, -1, true);
+        hw_serial.setRxTimeout(10);
+
         wallPanelDetected = false;
         wallPanelBooting = false;
         doorState = GarageDoorCurrentState::UNKNOWN;
@@ -1351,9 +1356,9 @@ void comms_loop_sec1()
 
     // get all the rxed bytes processed now
     // any rx bytes will reset clearToSend
-    while (sw_serial.available())
+    while (hw_serial.available())
     {
-        uint8_t ser_byte = sw_serial.read();
+        uint8_t ser_byte = hw_serial.read();
 
         // reading byte so clear flag
         isRxPending();
@@ -1379,6 +1384,7 @@ void comms_loop_sec1()
             break;
         }
 
+        /*
         // parity check on byte
         if (sw_serial.readParity() != sw_serial.parityEven(ser_byte))
         {
@@ -1392,6 +1398,7 @@ void comms_loop_sec1()
 
             continue;
         }
+        */
 
         if (ser_byte == secplus1Codes::QueryDoorStatus_0x37 && !reading_msg)
         {
@@ -1467,7 +1474,7 @@ void comms_loop_sec1()
     // or if a RX BIT has been has been received
     // or any ready bytes available (a byte came in somehow during above while loop, during testing it was only ever 1 byte)
     // process on next pass
-    if (reading_msg == true || isRxPending() || sw_serial.available())
+    if (reading_msg == true || isRxPending() || hw_serial.available())
     {
         return;
     }
@@ -1857,7 +1864,7 @@ bool transmitSec1(byte toSend)
     bool success = false;
 
     // safety #1
-    if (sw_serial.available())
+    if (hw_serial.available())
     {
         ESP_LOGD(TAG, "SEC1 TX incoming data detected, cannot send right now");
         noSend = true;
@@ -1920,11 +1927,12 @@ bool transmitSec1(byte toSend)
     if (!poll_cmd)
     {
         // read off echo, it is ready right after the write()
-        int echoByte = sw_serial.read();
+        byte echoByte;
+        int count = hw_serial.readBytes(&echoByte, 1);
         // clear RxPending flag
         isRxPending();
         // check echo
-        if (echoByte == -1)
+        if (count == -1)
         {
             // LOST THE BYTE COMPLETELY
             ESP_LOGD(TAG, "SEC1 TX LOST ECHO OF: 0x%02X", toSend);
@@ -1962,8 +1970,8 @@ bool transmitSec1(byte toSend)
             // settle
             delay(2);
             // we just connected the panel, if some bits coming in (due to connection), clear RxPending flag & flush
-            if (isRxPending())
-                sw_serial.flush();
+            //if (isRxPending())
+            //    sw_serial.flush();
         }
     }
 
