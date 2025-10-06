@@ -1950,7 +1950,6 @@ bool transmitSec1(byte toSend)
     // every byte we send echos, but want the echo on polls to id the GDO response
     //sw_serial.write(toSend);
     uart_write_bytes(UART_NUM_2, &toSend, 1);
-    uart_flush(UART_NUM_2);
 
     // timestamp tx
     last_tx = _millis();
