@@ -115,7 +115,7 @@ HardwareSerial hw_serial(2);
 #define SECPLUS1_RX_MESSAGE_TIMEOUT 20
 #define SECPLUS1_TX_WINDOW_OPEN 5
 #define SECPLUS1_TX_WINDOW_CLOSE 200
-#define SECPLUS1_TX_MINIMUM_DELAY 50
+#define SECPLUS1_TX_MINIMUM_DELAY 30
 #define SECPLUS2_TX_MINIMUM_DELAY 50
 
 #define COMMS_STATUS_TIMEOUT 2000
@@ -463,6 +463,8 @@ void setup_comms()
         // enable wall panel
         wallPanelConnected = WP_CONNECTED;
         digitalWrite(STATUS_DOOR_PIN, wallPanelConnected);
+
+        // set minimum delay between tx bytes
         tx_minimum_delay = SECPLUS1_TX_MINIMUM_DELAY;
 
         sw_serial.begin(1200, SWSERIAL_8E1, -1, UART_TX_PIN, true, 32);
@@ -2406,7 +2408,8 @@ void TTCtimerFn(void (*callback)(), bool light)
         // only SEC+1,0
         if (doorControlType == 1)
         {
-            sec1_light_release(2, 250);
+            // sec1_light_release(2, 250);
+            sec1_light_release(4);
         }
 #endif
         // delay so that set_light() can do its thing
@@ -2660,9 +2663,8 @@ void sec1_light_press(uint32_t delay)
     data.value.light.pressed = true;
     Packet pkt = Packet(PacketCommand::Light, data, id_code);
     PacketAction pkt_ac = {pkt, true, 0};
-
-    if (doorControlType == 1)
-        pkt_ac.delay = delay;
+    pkt_ac.delay = delay;
+    
     if (!txQueuePush(&pkt_ac))
     {
         ESP_LOGE(TAG, "packet queue full, dropping light press pkt");
@@ -2683,9 +2685,8 @@ void sec1_light_release(uint8_t howManyReleases, uint32_t delay)
     data.value.light.pressed = false;
     Packet pkt = Packet(PacketCommand::Light, data, id_code);
     PacketAction pkt_ac = {pkt, true, 0};
-
-    if (doorControlType == 1)
-        pkt_ac.delay = delay;
+    pkt_ac.delay = delay;
+    
     for (int numReleases = 0; numReleases < std::max(2, (int)howManyReleases); numReleases++)
     {
         if (!txQueuePush(&pkt_ac))
