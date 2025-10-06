@@ -39,6 +39,8 @@
 #include "cQueue.h"
 #endif // ESP8266
 
+#include "driver/uart.h"
+
 static const char *TAG = "ratgdo-comms";
 
 bool comms_setup_done = false;
@@ -467,11 +469,24 @@ void setup_comms()
         // set minimum delay between tx bytes
         tx_minimum_delay = SECPLUS1_TX_MINIMUM_DELAY;
 
-        sw_serial.begin(1200, SWSERIAL_8E1, -1, UART_TX_PIN, true, 32);
+        //sw_serial.begin(1200, SWSERIAL_8E1, UART_RX_PIN, UART_TX_PIN, true, 32);
         //sw_serial.onReceive(receiveHandler);
+        //sw_serial.setTimeout(10);
 
-        hw_serial.begin(1200, SERIAL_8E1, UART_RX_PIN, -1, true);
-        hw_serial.setRxTimeout(10);
+        
+        const uart_config_t uart_config = {
+        .baud_rate = 1200,
+        .data_bits = UART_DATA_8_BITS,
+        .parity = UART_PARITY_EVEN,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        .source_clk = UART_SCLK_DEFAULT,
+        };
+        uart_param_config(UART_NUM_2, &uart_config);
+        uart_set_line_inverse(UART_NUM_2, UART_SIGNAL_TXD_INV | UART_SIGNAL_RXD_INV);
+        uart_set_pin(UART_NUM_2, UART_TX_PIN, UART_RX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+        uart_driver_install(UART_NUM_2, 160 * 2, 0, 0, NULL, 0);
+    
 
         wallPanelDetected = false;
         wallPanelBooting = false;
@@ -1370,9 +1385,11 @@ void comms_loop_sec1()
 
     // get all the rxed bytes processed now
     // any rx bytes will reset clearToSend
-    while (hw_serial.available())
+    //while (sw_serial.available())
+    byte rxBuff[2];
+    while (uart_read_bytes(UART_NUM_2, rxBuff, 1, 0) > 0)
     {
-        uint8_t ser_byte = hw_serial.read();
+        uint8_t ser_byte = rxBuff[0]; // sw_serial.read();
 
         // reading byte so clear flag
         isRxPending();
@@ -1488,7 +1505,7 @@ void comms_loop_sec1()
     // or if a RX BIT has been has been received
     // or any ready bytes available (a byte came in somehow during above while loop, during testing it was only ever 1 byte)
     // process on next pass
-    if (reading_msg == true || isRxPending() || hw_serial.available())
+    if (reading_msg == true || isRxPending() || sw_serial.available())
     {
         return;
     }
@@ -1878,11 +1895,13 @@ bool transmitSec1(byte toSend)
     bool success = false;
 
     // safety #1
-    if (hw_serial.available())
+    /*
+    if (sw_serial.available())
     {
         ESP_LOGD(TAG, "SEC1 TX incoming data detected, cannot send right now");
         noSend = true;
     }
+    */
     // safety #2
     if (digitalRead(UART_RX_PIN))
     {
@@ -1929,12 +1948,16 @@ bool transmitSec1(byte toSend)
 
     // aprox 10ms to write byte
     // every byte we send echos, but want the echo on polls to id the GDO response
-    sw_serial.write(toSend);
+    //sw_serial.write(toSend);
+    uart_write_bytes(UART_NUM_2, &toSend, 1);
+    uart_flush(UART_NUM_2);
+
     // timestamp tx
     last_tx = _millis();
     // byte sent
     success = true;
 
+    /*
     // this to "confirm" tx byte
     // there is never any issues when sending without a wall panel
     // but all push/release commands need to be read in here(since enableRx is now enabled)
@@ -1942,11 +1965,13 @@ bool transmitSec1(byte toSend)
     {
         // read off echo, it is ready right after the write()
         byte echoByte;
-        int count = hw_serial.readBytes(&echoByte, 1);
+        //int count = sw_serial.readBytes(&echoByte, 1);
+        int count = uart_read_bytes(UART_NUM_2, &echoByte, 1, 10 / portTICK_PERIOD_MS);
+
         // clear RxPending flag
         isRxPending();
         // check echo
-        if (count == -1)
+        if (count == 0)
         {
             // LOST THE BYTE COMPLETELY
             ESP_LOGD(TAG, "SEC1 TX LOST ECHO OF: 0x%02X", toSend);
@@ -1967,6 +1992,7 @@ bool transmitSec1(byte toSend)
             }
         }
     }
+    */
 
     // re-enable rx
     if (!poll_cmd)
@@ -1987,7 +2013,7 @@ bool transmitSec1(byte toSend)
             //if (isRxPending())
             //    sw_serial.flush();
         }
-    }
+    }   
 
     return success;
 }
