@@ -114,7 +114,7 @@ SoftwareSerial sw_serial;
 #define SECPLUS1_RX_MESSAGE_TIMEOUT 20
 #define SECPLUS1_TX_WINDOW_OPEN 5
 #define SECPLUS1_TX_WINDOW_CLOSE 200
-#define SECPLUS1_TX_MINIMUM_DELAY 30
+#define SECPLUS1_TX_MINIMUM_DELAY 50
 #define SECPLUS2_TX_MINIMUM_DELAY 50
 
 #define COMMS_STATUS_TIMEOUT 2000
@@ -293,8 +293,6 @@ void send_get_openings();
 bool transmitSec1(byte toSend);
 bool transmitSec2(PacketAction &pkt_ac);
 void obstruction_timer();
-void sec1_light_press();
-void sec1_light_release(uint8_t howManyReleases = 2);
 void sec1_poll_status(uint8_t sec1PollCmd);
 #endif // not USE_GDOLIB
 
@@ -1210,6 +1208,10 @@ void sec1_process_message(uint8_t key, uint8_t value = 0xFF)
             prevLightLock = lastLightState = 0xFF;
             break;
         }
+        else if (lastLightState == 0xFF) {
+            // Force update of light state in any listening client
+            last_reported_garage_door.light = !garage_door.light;
+        }
 
         if (value != prevLightLock)
         {
@@ -1287,7 +1289,7 @@ bool process_send_queue()
     txQueuePeek(&pkt_ac); // No need to check return value, we know queue is not empty
 
     bool okToSend = false;
-    if ((_millis() - last_tx) >= std::max(tx_minimum_delay, pkt_ac.delay))
+    if ((_millis() - last_tx) >= std::max((uint32_t)tx_minimum_delay, (uint32_t)pkt_ac.delay))
     {
         okToSend = true;
     }
@@ -2396,7 +2398,7 @@ void TTCtimerFn(void (*callback)(), bool light)
         // only SEC+1,0
         if (doorControlType == 1)
         {
-            sec1_light_release(4);
+            sec1_light_release(2, 250);
         }
 #endif
         // delay so that set_light() can do its thing
@@ -2642,7 +2644,7 @@ bool set_light(bool value, bool verify)
 }
 #else
 
-void sec1_light_press()
+void sec1_light_press(uint32_t delay)
 {
     PacketData data;
     data.type = PacketDataType::Light;
@@ -2652,7 +2654,7 @@ void sec1_light_press()
     PacketAction pkt_ac = {pkt, true, 0};
 
     if (doorControlType == 1)
-        pkt_ac.delay = 150;
+        pkt_ac.delay = delay;
     if (!txQueuePush(&pkt_ac))
     {
         ESP_LOGE(TAG, "packet queue full, dropping light press pkt");
@@ -2665,7 +2667,7 @@ void sec1_light_press()
     }
 }
 
-void sec1_light_release(uint8_t howManyReleases)
+void sec1_light_release(uint8_t howManyReleases, uint32_t delay)
 {
     PacketData data;
     data.type = PacketDataType::Light;
@@ -2675,7 +2677,7 @@ void sec1_light_release(uint8_t howManyReleases)
     PacketAction pkt_ac = {pkt, true, 0};
 
     if (doorControlType == 1)
-        pkt_ac.delay = 250;
+        pkt_ac.delay = delay;
     for (int numReleases = 0; numReleases < std::max(2, (int)howManyReleases); numReleases++)
     {
         if (!txQueuePush(&pkt_ac))
