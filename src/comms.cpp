@@ -107,8 +107,11 @@ inline bool txQueuePop(PacketAction *pkt)
 #endif
 }
 
+// used by SEC+1.0
+#define hw_serial Serial2
+// used by SEC+2.0
 SoftwareSerial sw_serial;
-HardwareSerial hw_serial(2);
+
 #endif // not USE_GDOLIB
 
 #define SECPLUS1_DIGITAL_WALLPLATE_TIMEOUT 15000
