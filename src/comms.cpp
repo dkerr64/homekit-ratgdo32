@@ -477,6 +477,8 @@ void setup_comms()
         tx_minimum_delay = SECPLUS1_TX_MINIMUM_DELAY;
 
 #ifdef ESP32
+        gpio_reset_pin(UART_TX_PIN);
+        gpio_reset_pin(UART_RX_PIN);
         Sec1Serial.begin(1200, SERIAL_8E1, UART_RX_PIN, UART_TX_PIN, true);
         Sec1Serial.onReceiveError(receiveErrorHandler);
         Sec1Serial.setTimeout(10); // 10 ms used for Sec1Serial.readBytes() in transmitSec1()
@@ -1365,13 +1367,17 @@ bool process_send_queue()
         {
             if (retryCount++ < MAX_COMMS_RETRY)
             {
-                ESP_LOGD(TAG, "SEC1 TX send failed, will retry. retryCount=%d", retryCount);
+                if (doorControlType == 1)
+                    ESP_LOGD(TAG, "SEC1 TX send [0x%02X] failed, will retry. retryCount at %d", pkt_ac.pkt.m_data.value.cmd, retryCount);
+                else
+                    ESP_LOGD(TAG, "SEC2 TX send failed, will retry. retryCount at %d", retryCount);
+
                 // get out now, leaving the TX packet on the queue.
                 return false;
             }
             else
             {
-                ESP_LOGE(TAG, "SEC1 TX send failed, exceeded max retry");
+                ESP_LOGE(TAG, "SEC%d TX send failed, exceeded max retry", doorControlType);
                 retryCount = 0;
                 // Remove TX packet from the queue
                 txQueuePop(&pkt_ac);
@@ -1441,7 +1447,7 @@ void comms_loop_sec1()
             break;
         }
 
-        #ifdef ESP8266
+#ifdef ESP8266
         // parity check on byte (only available of SoftwareSerial)
         if (Sec1Serial.readParity() != Sec1Serial.parityEven(ser_byte))
         {
@@ -1455,7 +1461,7 @@ void comms_loop_sec1()
 
             continue;
         }
-        #endif
+#endif
 
         if (ser_byte == secplus1Codes::QueryDoorStatus_0x37 && !reading_msg)
         {
@@ -2093,138 +2099,11 @@ bool process_PacketAction(PacketAction &pkt_ac)
     }
 
     // Must be Sec+1.0 protocol...
-    // check which action
-    switch (pkt_ac.pkt.m_data.type)
+    // safety
+    if (pkt_ac.pkt.m_data.value.cmd)
     {
-    // using this type for emulation of wall panel
-    case PacketDataType::Status:
-    {
-        // 0x38 || 0x39 || 0x3A
-        if (pkt_ac.pkt.m_data.value.cmd)
-        {
-            success = transmitSec1(pkt_ac.pkt.m_data.value.cmd);
-            if (success)
-            {
-                // use for SEC1 debug only as its too chatty
-#ifdef DEBUG_SECPLUS1_COMMS
-                ESP_LOGI(TAG, "SEC1 TX sent POLL: %02X", pkt_ac.pkt.m_data.value.cmd);
-#endif
-            }
-        }
-        break;
+        success = transmitSec1(pkt_ac.pkt.m_data.value.cmd);
     }
-    case PacketDataType::DoorAction:
-    {
-        if (pkt_ac.pkt.m_data.value.door_action.pressed == true)
-        {
-            // ESP_LOGI(TAG, "SEC1 TX sending DOOR button press");
-
-            success = transmitSec1(secplus1Codes::DoorButtonPress);
-            if (success)
-            {
-                // ESP_LOGI(TAG, "SEC1 TX sent DOOR button press");
-            }
-            else
-            {
-                ESP_LOGI(TAG, "SEC1 TX failed to send DOOR button press");
-            }
-        }
-        else
-        {
-            // ESP_LOGI(TAG, "SEC1 TX sending DOOR button release");
-
-            success = transmitSec1(secplus1Codes::DoorButtonRelease);
-            if (success)
-            {
-                // ESP_LOGI(TAG, "SEC1 TX sent DOOR button release");
-            }
-            else
-            {
-                ESP_LOGI(TAG, "SEC1 TX failed to send DOOR button release");
-            }
-        }
-        break;
-    }
-
-    case PacketDataType::Light:
-    {
-        if (pkt_ac.pkt.m_data.value.light.pressed == true)
-        {
-            // ESP_LOGI(TAG, "SEC1 TX sending LIGHT button press");
-
-            success = transmitSec1(secplus1Codes::LightButtonPress);
-            if (success)
-            {
-                // ESP_LOGI(TAG, "SEC1 TX sent LIGHT button press");
-            }
-            else
-            {
-                ESP_LOGI(TAG, "SEC1 TX failed to send LIGHT button press");
-            }
-        }
-        else
-        {
-            // ESP_LOGI(TAG, "SEC1 TX sending LIGHT button release");
-
-            success = transmitSec1(secplus1Codes::LightButtonRelease);
-            if (success)
-            {
-                // ESP_LOGI(TAG, "SEC1 TX sent LIGHT button release");
-            }
-            else
-            {
-                ESP_LOGI(TAG, "SEC1 TX failed to send LIGHT button release");
-            }
-        }
-        break;
-    }
-
-    case PacketDataType::Lock:
-    {
-        if (pkt_ac.pkt.m_data.value.lock.pressed == true)
-        {
-            // ESP_LOGI(TAG, "SEC1 TX sending LOCK button press");
-            /* Removing this section as testing with 398LM (a 0x37 wall panel) was never successful.
-            if (is_0x37_panel)
-            {
-                // ESPhome firmware does not send lock button press here... it is deferred until
-                // immediately after receiving the 0x37.  WHY??? No Idea.
-                break; // success is false
-            }
-            */
-            success = transmitSec1(secplus1Codes::LockButtonPress);
-            if (success)
-            {
-                // ESP_LOGI(TAG, "SEC1 TX sent LOCK button press");
-            }
-            else
-            {
-                ESP_LOGI(TAG, "SEC1 TX failed to send LOCK button press");
-            }
-        }
-        else
-        {
-            // ESP_LOGI(TAG, "SEC1 TX sending LOCK button release");
-
-            success = transmitSec1(secplus1Codes::LockButtonRelease);
-            if (success)
-            {
-                // ESP_LOGI(TAG, "SEC1 TX sent LOCK button release");
-            }
-            else
-            {
-                ESP_LOGI(TAG, "SEC1 TX failed to send LOCK button release");
-            }
-        }
-        break;
-    }
-
-    default:
-    {
-        ESP_LOGE(TAG, "SEC1 TX UNHANDLED pkt_ac.pkt.m_data.type=%d", pkt_ac.pkt.m_data.type);
-        break;
-    }
-    } // end of switch()
 
     return success;
 }
@@ -2262,6 +2141,7 @@ void door_command(DoorAction action)
         data.type = PacketDataType::DoorAction;
         data.value.door_action.action = action;
         data.value.door_action.pressed = true;
+        data.value.cmd = secplus1Codes::DoorButtonPress;
         data.value.door_action.id = 1;
 
         Packet pkt = Packet(PacketCommand::DoorAction, data, id_code);
@@ -2284,6 +2164,7 @@ void door_command(DoorAction action)
 
         // do button release
         pkt_ac.pkt.m_data.value.door_action.pressed = false;
+        data.value.cmd = secplus1Codes::DoorButtonRelease;
         pkt_ac.inc_counter = true;
         if (!txQueuePush(&pkt_ac))
         {
@@ -2647,6 +2528,7 @@ bool set_lock(bool value, bool verify)
     if (doorControlType == 1)
     {
         data.value.lock.pressed = true;
+        data.value.cmd = secplus1Codes::LockButtonPress;
         Packet pkt = Packet(PacketCommand::Lock, data, id_code);
         PacketAction pkt_ac = {pkt, true, 0};
 
@@ -2657,6 +2539,7 @@ bool set_lock(bool value, bool verify)
         }
         // button release
         pkt_ac.pkt.m_data.value.lock.pressed = false;
+        data.value.cmd = secplus1Codes::LockButtonRelease;
         if (!txQueuePush(&pkt_ac))
         {
             ESP_LOGE(TAG, "packet queue full, dropping lock pkt");
@@ -2704,6 +2587,7 @@ void sec1_light_press(uint32_t delay)
     data.type = PacketDataType::Light;
     data.value.light.light = LightState::On;
     data.value.light.pressed = true;
+    data.value.cmd = secplus1Codes::LightButtonPress;
     Packet pkt = Packet(PacketCommand::Light, data, id_code);
     PacketAction pkt_ac = {pkt, true, 0};
     pkt_ac.delay = delay;
@@ -2726,6 +2610,7 @@ void sec1_light_release(uint8_t howManyReleases, uint32_t delay)
     data.type = PacketDataType::Light;
     data.value.light.light = LightState::On;
     data.value.light.pressed = false;
+    data.value.cmd = secplus1Codes::LightButtonRelease;
     Packet pkt = Packet(PacketCommand::Light, data, id_code);
     PacketAction pkt_ac = {pkt, true, 0};
     pkt_ac.delay = delay;
