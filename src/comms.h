@@ -18,6 +18,7 @@
 #include <stdint.h>
 
 extern void setup_comms();
+extern void shutdown_comms();
 extern void comms_loop();
 
 extern GarageDoorCurrentState open_door();

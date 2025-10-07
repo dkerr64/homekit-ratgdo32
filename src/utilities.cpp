@@ -25,7 +25,6 @@
 #else
 #include <esp_sntp.h>
 #include <HTTPClient.h>
-#include "driver/uart.h"
 #endif
 
 // RATGDO project includes
@@ -293,6 +292,8 @@ void load_all_config_settings()
 
 void sync_and_restart()
 {
+    shutdown_comms();
+
     if (clockSet)
     {
         // Log time we shut down.
@@ -319,9 +320,6 @@ void sync_and_restart()
     file.close();
     LittleFS.end();
 #else
-    gpio_reset_pin(UART_TX_PIN);
-    gpio_reset_pin(UART_RX_PIN);
-    uart_driver_delete(UART_NUM_2);
     // Save current logs in case needed for future analysis
     ratgdoLogger->saveMessageLog();
 #endif
