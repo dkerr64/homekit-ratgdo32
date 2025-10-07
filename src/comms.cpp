@@ -1946,7 +1946,7 @@ bool transmitSec1(byte toSend)
         // clear RxPending flag
         isRxPending();
         // check echo
-        if (count == -1)
+        if (count == 0)
         {
             // LOST THE BYTE COMPLETELY
             ESP_LOGD(TAG, "SEC1 TX LOST ECHO OF: 0x%02X", toSend);
