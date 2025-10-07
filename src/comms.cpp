@@ -2164,7 +2164,7 @@ void door_command(DoorAction action)
 
         // do button release
         pkt_ac.pkt.m_data.value.door_action.pressed = false;
-        data.value.cmd = secplus1Codes::DoorButtonRelease;
+        pkt_ac.pkt.m_data.value.cmd = secplus1Codes::DoorButtonRelease;
         pkt_ac.inc_counter = true;
         if (!txQueuePush(&pkt_ac))
         {
@@ -2539,7 +2539,7 @@ bool set_lock(bool value, bool verify)
         }
         // button release
         pkt_ac.pkt.m_data.value.lock.pressed = false;
-        data.value.cmd = secplus1Codes::LockButtonRelease;
+        pkt_ac.pkt.m_data.value.cmd = secplus1Codes::LockButtonRelease;
         if (!txQueuePush(&pkt_ac))
         {
             ESP_LOGE(TAG, "packet queue full, dropping lock pkt");
