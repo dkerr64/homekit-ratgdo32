@@ -467,10 +467,11 @@ void setup_comms()
         // set minimum delay between tx bytes
         tx_minimum_delay = SECPLUS1_TX_MINIMUM_DELAY;
 
-        sw_serial.begin(1200, SWSERIAL_8E1, -1, UART_TX_PIN, true, 32);
+        //sw_serial.begin(1200, SWSERIAL_8E1, -1, UART_TX_PIN, true, 32);
         //sw_serial.onReceive(receiveHandler);
 
         hw_serial.begin(1200, SERIAL_8E1, UART_RX_PIN, -1, true);
+        hw_serial.setPins(UART_RX_PIN, UART_TX_PIN);
         hw_serial.setRxTimeout(10);
 
         wallPanelDetected = false;
@@ -1929,7 +1930,7 @@ bool transmitSec1(byte toSend)
 
     // aprox 10ms to write byte
     // every byte we send echos, but want the echo on polls to id the GDO response
-    sw_serial.write(toSend);
+    hw_serial.write(toSend);
     // timestamp tx
     last_tx = _millis();
     // byte sent
@@ -1983,6 +1984,7 @@ bool transmitSec1(byte toSend)
             // ESP_LOGD(TAG, "WP+");
             // settle
             delay(2);
+            hw_serial.flush();
             // we just connected the panel, if some bits coming in (due to connection), clear RxPending flag & flush
             //if (isRxPending())
             //    sw_serial.flush();
