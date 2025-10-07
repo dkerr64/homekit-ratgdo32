@@ -295,6 +295,7 @@ bool transmitSec1(byte toSend);
 bool transmitSec2(PacketAction &pkt_ac);
 void obstruction_timer();
 void sec1_poll_status(uint8_t sec1PollCmd);
+void receiveErrorHandler(hardwareSerial_error_t error);
 #endif // not USE_GDOLIB
 
 void manual_recovery();
@@ -467,12 +468,13 @@ void setup_comms()
         // set minimum delay between tx bytes
         tx_minimum_delay = SECPLUS1_TX_MINIMUM_DELAY;
 
-        //sw_serial.begin(1200, SWSERIAL_8E1, -1, UART_TX_PIN, true, 32);
-        //sw_serial.onReceive(receiveHandler);
+        // sw_serial.begin(1200, SWSERIAL_8E1, -1, UART_TX_PIN, true, 32);
+        // sw_serial.onReceive(receiveHandler);
 
         hw_serial.begin(1200, SERIAL_8E1, UART_RX_PIN, -1, true);
         hw_serial.setPins(UART_RX_PIN, UART_TX_PIN);
         hw_serial.setRxTimeout(10);
+        hw_serial.onReceiveError(receiveErrorHandler);
 
         wallPanelDetected = false;
         wallPanelBooting = false;
@@ -1216,7 +1218,8 @@ void sec1_process_message(uint8_t key, uint8_t value = 0xFF)
             prevLightLock = lastLightState = 0xFF;
             break;
         }
-        else if (lastLightState == 0xFF) {
+        else if (lastLightState == 0xFF)
+        {
             // Force update of light state in any listening client
             last_reported_garage_door.light = !garage_door.light;
         }
@@ -1351,6 +1354,18 @@ bool process_send_queue()
     return true;
 }
 
+void receiveErrorHandler(hardwareSerial_error_t error)
+{
+    // ESP_LOGD(TAG, "-- onReceiveError: [ERR#%d:%s]", error, uartErrorStrings[error]);
+
+    if (error == hardwareSerial_error_t::UART_PARITY_ERROR)
+    {
+        // LOOKS LIKE THE BYTE THE ERROR HAPPENS ON, IS NOT
+        // PLACED IN THE RECEIVE BUFFER
+        // might need to post in espressif to find out
+    }
+}
+
 void comms_loop_sec1()
 {
     static bool reading_msg = false;
@@ -1401,7 +1416,8 @@ void comms_loop_sec1()
 
         /*
         // parity check on byte
-        if (sw_serial.readParity() != sw_serial.parityEven(ser_byte))
+        if (isRxParityError())
+        //if (sw_serial.readParity() != sw_serial.parityEven(ser_byte))
         {
             if (reading_msg)
                 ESP_LOGD(TAG, "SEC1 RX Parity error on 2nd byte of poll msg [0x%02X:0x%02X]", rx_packet[0], ser_byte);
@@ -1986,7 +2002,7 @@ bool transmitSec1(byte toSend)
             delay(2);
             hw_serial.flush();
             // we just connected the panel, if some bits coming in (due to connection), clear RxPending flag & flush
-            //if (isRxPending())
+            // if (isRxPending())
             //    sw_serial.flush();
         }
     }
@@ -2666,7 +2682,7 @@ void sec1_light_press(uint32_t delay)
     Packet pkt = Packet(PacketCommand::Light, data, id_code);
     PacketAction pkt_ac = {pkt, true, 0};
     pkt_ac.delay = delay;
-    
+
     if (!txQueuePush(&pkt_ac))
     {
         ESP_LOGE(TAG, "packet queue full, dropping light press pkt");
@@ -2688,7 +2704,7 @@ void sec1_light_release(uint8_t howManyReleases, uint32_t delay)
     Packet pkt = Packet(PacketCommand::Light, data, id_code);
     PacketAction pkt_ac = {pkt, true, 0};
     pkt_ac.delay = delay;
-    
+
     for (int numReleases = 0; numReleases < std::max(2, (int)howManyReleases); numReleases++)
     {
         if (!txQueuePush(&pkt_ac))
