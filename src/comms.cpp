@@ -108,7 +108,12 @@ inline bool txQueuePop(PacketAction *pkt)
 }
 
 // used by SEC+1.0
+#ifdef ESP32
 #define Sec1Serial Serial2
+#else
+#define Sec1Serial sw_serial;
+#endif
+
 // used by SEC+2.0
 SoftwareSerial sw_serial;
 
@@ -471,12 +476,14 @@ void setup_comms()
         // set minimum delay between tx bytes
         tx_minimum_delay = SECPLUS1_TX_MINIMUM_DELAY;
 
-        // sw_serial.begin(1200, SWSERIAL_8E1, -1, UART_TX_PIN, true, 32);
-        // sw_serial.onReceive(receiveHandler);
-
+#ifdef ESP32
         Sec1Serial.begin(1200, SERIAL_8E1, UART_RX_PIN, UART_TX_PIN, true);
         Sec1Serial.onReceiveError(receiveErrorHandler);
         Sec1Serial.setTimeout(10); // 10 ms used for Sec1Serial.readBytes() in transmitSec1()
+#else
+        Sec1Serial.begin(1200, SWSERIAL_8E1, UART_RX_PIN, UART_TX_PIN, true, 32);
+        Sec1Serial.onReceive(receiveHandler);
+#endif
 
         wallPanelDetected = false;
         wallPanelBooting = false;
@@ -1434,10 +1441,9 @@ void comms_loop_sec1()
             break;
         }
 
-        /*
-        // parity check on byte
-        if (isRxParityError())
-        //if (sw_serial.readParity() != sw_serial.parityEven(ser_byte))
+        #ifdef ESP8266
+        // parity check on byte (only available of SoftwareSerial)
+        if (Sec1Serial.readParity() != Sec1Serial.parityEven(ser_byte))
         {
             if (reading_msg)
                 ESP_LOGD(TAG, "SEC1 RX Parity error on 2nd byte of poll msg [0x%02X:0x%02X]", rx_packet[0], ser_byte);
@@ -1449,7 +1455,7 @@ void comms_loop_sec1()
 
             continue;
         }
-        */
+        #endif
 
         if (ser_byte == secplus1Codes::QueryDoorStatus_0x37 && !reading_msg)
         {
@@ -2020,10 +2026,9 @@ bool transmitSec1(byte toSend)
             // ESP_LOGD(TAG, "WP+");
             // settle
             delay(2);
-            Sec1Serial.flush();
             // we just connected the panel, if some bits coming in (due to connection), clear RxPending flag & flush
-            // if (isRxPending())
-            //    sw_serial.flush();
+            isRxPending();
+            Sec1Serial.flush();
         }
     }
 
