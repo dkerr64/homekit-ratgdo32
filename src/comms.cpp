@@ -108,7 +108,7 @@ inline bool txQueuePop(PacketAction *pkt)
 }
 
 // used by SEC+1.0
-#define hw_serial Serial2
+#define Sec1Serial Serial2
 // used by SEC+2.0
 SoftwareSerial sw_serial;
 
@@ -474,10 +474,9 @@ void setup_comms()
         // sw_serial.begin(1200, SWSERIAL_8E1, -1, UART_TX_PIN, true, 32);
         // sw_serial.onReceive(receiveHandler);
 
-        hw_serial.begin(1200, SERIAL_8E1, UART_RX_PIN, -1, true);
-        hw_serial.setPins(UART_RX_PIN, UART_TX_PIN);
-        hw_serial.setRxTimeout(10);
-        hw_serial.onReceiveError(receiveErrorHandler);
+        Sec1Serial.begin(1200, SERIAL_8E1, UART_RX_PIN, UART_TX_PIN, true);
+        Sec1Serial.onReceiveError(receiveErrorHandler);
+        Sec1Serial.setTimeout(10); // 10 ms used for Sec1Serial.readBytes() in transmitSec1()
 
         wallPanelDetected = false;
         wallPanelBooting = false;
@@ -670,6 +669,24 @@ void setup_comms()
 #endif
     comms_setup_done = true;
     comms_status_start = _millis();
+}
+
+/****************************************************************************
+ * shutdown communications
+ */
+void shutdown_comms()
+{
+    if (doorControlType == 1)
+    {
+        Sec1Serial.end();
+    }
+    else
+    {
+        sw_serial.end();
+    }
+
+    gpio_reset_pin(UART_TX_PIN);
+    gpio_reset_pin(UART_RX_PIN);
 }
 
 /****************************************************************************
@@ -1389,9 +1406,9 @@ void comms_loop_sec1()
 
     // get all the rxed bytes processed now
     // any rx bytes will reset clearToSend
-    while (hw_serial.available())
+    while (Sec1Serial.available())
     {
-        uint8_t ser_byte = hw_serial.read();
+        uint8_t ser_byte = Sec1Serial.read();
 
         // reading byte so clear flag
         isRxPending();
@@ -1508,7 +1525,7 @@ void comms_loop_sec1()
     // or if a RX BIT has been has been received
     // or any ready bytes available (a byte came in somehow during above while loop, during testing it was only ever 1 byte)
     // process on next pass
-    if (reading_msg == true || isRxPending() || hw_serial.available())
+    if (reading_msg == true || isRxPending() || Sec1Serial.available())
     {
         return;
     }
@@ -1898,7 +1915,7 @@ bool transmitSec1(byte toSend)
     bool success = false;
 
     // safety #1
-    if (hw_serial.available())
+    if (Sec1Serial.available())
     {
         ESP_LOGD(TAG, "SEC1 TX incoming data detected, cannot send right now");
         noSend = true;
@@ -1949,7 +1966,7 @@ bool transmitSec1(byte toSend)
 
     // aprox 10ms to write byte
     // every byte we send echos, but want the echo on polls to id the GDO response
-    hw_serial.write(toSend);
+    Sec1Serial.write(toSend);
     // timestamp tx
     last_tx = _millis();
     // byte sent
@@ -1962,7 +1979,7 @@ bool transmitSec1(byte toSend)
     {
         // read off echo, it is ready right after the write()
         byte echoByte;
-        int count = hw_serial.readBytes(&echoByte, 1);
+        int count = Sec1Serial.readBytes(&echoByte, 1);
         // clear RxPending flag
         isRxPending();
         // check echo
@@ -2003,7 +2020,7 @@ bool transmitSec1(byte toSend)
             // ESP_LOGD(TAG, "WP+");
             // settle
             delay(2);
-            hw_serial.flush();
+            Sec1Serial.flush();
             // we just connected the panel, if some bits coming in (due to connection), clear RxPending flag & flush
             // if (isRxPending())
             //    sw_serial.flush();
