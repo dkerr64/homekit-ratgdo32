@@ -311,7 +311,9 @@ bool transmitSec1(byte toSend);
 bool transmitSec2(PacketAction &pkt_ac);
 void obstruction_timer();
 void sec1_poll_status(uint8_t sec1PollCmd);
+#ifdef ESP32
 void receiveErrorHandler(hardwareSerial_error_t error);
+#endif
 #endif // not USE_GDOLIB
 
 void manual_recovery();
