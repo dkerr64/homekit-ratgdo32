@@ -259,9 +259,7 @@ bool wallPanelDetected = false;
 #define WP_DISCONNECTED HIGH
 uint8_t wallPanelConnected;
 // states
-GarageDoorCurrentState doorState = GarageDoorCurrentState::UNKNOWN;
-uint8_t lightState;
-uint8_t lockState;
+GarageDoorCurrentState doorState = (GarageDoorCurrentState)0xFF;
 
 // power up sequence + poll items for digitial wall panel 889LM
 // MJS: this is what MY 889LM exhibited when powered up (release of all buttons, and then polls)
@@ -293,13 +291,13 @@ enum secplus1Codes : uint8_t
     Unknown = 0xFF // (when rx fails parity test)
 };
 
-#define SEC1_CMD(s) (s == secplus1Codes::DoorButtonPress)      ? "Door Press"    \
-                    : (s == secplus1Codes::DoorButtonRelease)  ? "Door Release"  \
-                    : (s == secplus1Codes::LightButtonPress)   ? "Light Press"   \
-                    : (s == secplus1Codes::LightButtonRelease) ? "Light Release" \
-                    : (s == secplus1Codes::LockButtonPress)    ? "Lock Press"    \
-                    : (s == secplus1Codes::LockButtonRelease)  ? "Lock Release"  \
-                                                               : "Unknown"
+#define SEC1_CMD(s) (s == secplus1Codes::DoorButtonPress)      ? "door press"    \
+                    : (s == secplus1Codes::DoorButtonRelease)  ? "door release"  \
+                    : (s == secplus1Codes::LightButtonPress)   ? "light press"   \
+                    : (s == secplus1Codes::LightButtonRelease) ? "light release" \
+                    : (s == secplus1Codes::LockButtonPress)    ? "lock press"    \
+                    : (s == secplus1Codes::LockButtonRelease)  ? "lock release"  \
+                                                               : "unknown"
 
 // prototypes
 void sync();
@@ -499,9 +497,7 @@ void setup_comms()
 
         wallPanelDetected = false;
         wallPanelBooting = false;
-        doorState = GarageDoorCurrentState::UNKNOWN;
-        lightState = 2;
-        lockState = 2;
+        doorState = (GarageDoorCurrentState)0xFF;
     }
     else if (doorControlType == 2)
     {
@@ -791,7 +787,28 @@ void wallPlate_Emulation()
     _millis_t currentMillis = _millis();
     static _millis_t lastRequestMillis = 0;
     static _millis_t startMillis = currentMillis;
+    static bool emulateWallPanel = false;
 
+    // transmit every 250ms
+    if (emulateWallPanel && (currentMillis - lastRequestMillis) > 250)
+    {
+        static uint8_t stateIndex = 0;
+        lastRequestMillis = currentMillis;
+
+        byte secplus1ToSend = byte(secplus1States[stateIndex]);
+
+        sec1_poll_status(secplus1ToSend);
+
+        // set next poll
+        stateIndex++;
+        if (stateIndex == sizeof(secplus1States))
+        {
+            stateIndex = sizeof(secplus1States) - SECPLUS1_POLL_ITEMS;
+        }
+        return;
+    }
+
+    // Only get this far if we have not detected a digital wall panel or started emulation 
     // wait up to 15 seconds to look for an existing wallplate or it could be booting, so need to wait
     if (currentMillis - startMillis < SECPLUS1_DIGITAL_WALLPLATE_TIMEOUT || wallPanelBooting == true)
     {
@@ -801,8 +818,9 @@ void wallPlate_Emulation()
             lastRequestMillis = currentMillis;
         }
 
-        if (!wallPanelDetected && (doorState != GarageDoorCurrentState::UNKNOWN || lightState != 2))
+        if (!wallPanelDetected && (garage_door.current_state != (GarageDoorCurrentState)0xFF || garage_door.current_lock != (LockCurrentState)0xFF))
         {
+            ESP_LOGI(TAG, "Got %d, %d, %d", wallPanelDetected, garage_door.current_state, garage_door.current_lock);
             wallPanelDetected = true;
             wallPanelBooting = false;
             ESP_LOGI(TAG, "DIGITAL Wall panel detected.");
@@ -811,31 +829,11 @@ void wallPlate_Emulation()
     }
     else
     {
-        static bool emulateWallPanel = false;
         if (!emulateWallPanel && !wallPanelDetected)
         {
             emulateWallPanel = true;
-            ESP_LOGI(TAG, "No DIGITAL wall panel detected. Switching to emulation mode.");
-
             garage_door.wallPanelEmulated = true;
-        }
-
-        // transmit every 250ms
-        if (emulateWallPanel && (currentMillis - lastRequestMillis) > 250)
-        {
-            static uint8_t stateIndex = 0;
-            lastRequestMillis = currentMillis;
-
-            byte secplus1ToSend = byte(secplus1States[stateIndex]);
-
-            sec1_poll_status(secplus1ToSend);
-
-            // set next poll
-            stateIndex++;
-            if (stateIndex == sizeof(secplus1States))
-            {
-                stateIndex = sizeof(secplus1States) - SECPLUS1_POLL_ITEMS;
-            }
+            ESP_LOGI(TAG, "No DIGITAL wall panel detected. Switching to emulation mode.");
         }
     }
 }
@@ -870,7 +868,7 @@ void update_door_state(GarageDoorCurrentState current_state)
     case GarageDoorCurrentState::CURR_CLOSING:
         target_state = TGT_CLOSED;
         break;
-    case GarageDoorCurrentState::UNKNOWN:
+    default:
         ESP_LOGE(TAG, "Got door state unknown");
         break;
     }
@@ -1011,7 +1009,7 @@ void sec1_process_message(uint8_t key, uint8_t value = 0xFF)
         // but also on release of door button
         ESP_LOGD(TAG, "SEC1 RX 0x31 (door release)");
         // Possible power up of 889LM
-        if (doorState == GarageDoorCurrentState::UNKNOWN)
+        if (doorState == (GarageDoorCurrentState)0xFF)
         {
             wallPanelBooting = true;
         }
@@ -1204,7 +1202,7 @@ void sec1_process_message(uint8_t key, uint8_t value = 0xFF)
             break;
         default:
             ESP_LOGE(TAG, "SEC1 RX Got unknown \"value\" for door state");
-            current_state = GarageDoorCurrentState::UNKNOWN;
+            current_state = (GarageDoorCurrentState)0xFF;
             break;
         }
         update_door_state(current_state);
@@ -1279,8 +1277,8 @@ void sec1_process_message(uint8_t key, uint8_t value = 0xFF)
             break;
         }
 
-        lightState = bitRead(value, 2);
-        lockState = !bitRead(value, 3);
+        uint8_t lightState = bitRead(value, 2);
+        uint8_t lockState = !bitRead(value, 3);
 
         // light state change?
         if (lightState != lastLightState)
@@ -1362,7 +1360,7 @@ bool process_send_queue()
         if (isRxPending())
         {
             clearToSend = false;
-            ESP_LOGD(TAG, "SEC1 TX: late detection isRxPending");
+            ESP_LOGD(TAG, "SEC1 TX late detection isRxPending");
         }
 
         // close the tx window after Xms from start msg received
@@ -1613,7 +1611,7 @@ void comms_loop_sec2()
                 break;
             default:
                 ESP_LOGE(TAG, "Got unknown door state");
-                current_state = GarageDoorCurrentState::UNKNOWN;
+                current_state = (GarageDoorCurrentState)0xFF;
                 break;
             }
             update_door_state(current_state);
@@ -1855,7 +1853,7 @@ void comms_loop_sec2()
 
 void comms_loop_drycontact()
 {
-    static GarageDoorCurrentState previousDoorState = GarageDoorCurrentState::UNKNOWN;
+    static GarageDoorCurrentState previousDoorState = (GarageDoorCurrentState)0xFF;
 
     // Notify HomeKit when the door state changes
     if (doorState != previousDoorState)
@@ -1997,7 +1995,7 @@ bool transmitSec1(byte toSend)
             delay(2);
         }
 
-        ESP_LOGD(TAG, "SEC1 TX: 0x%02X (%s)", toSend, SEC1_CMD(toSend));
+        ESP_LOGD(TAG, "SEC1 TX 0x%02X (%s)", toSend, SEC1_CMD(toSend));
     }
 
     // aprox 10ms to write byte
@@ -2115,21 +2113,15 @@ bool transmitSec2(PacketAction &pkt_ac)
 
 bool process_PacketAction(PacketAction &pkt_ac)
 {
-    bool success = false;
-
     if (doorControlType == 2)
     {
         return transmitSec2(pkt_ac);
     }
-
-    // Must be Sec+1.0 protocol...
-    // safety
-    if (pkt_ac.pkt.m_data.value.cmd)
+    else if (pkt_ac.pkt.m_data.value.cmd)
     {
-        success = transmitSec1(pkt_ac.pkt.m_data.value.cmd);
+        return transmitSec1(pkt_ac.pkt.m_data.value.cmd);
     }
-
-    return success;
+    return false;
 }
 
 void sync()
@@ -2613,8 +2605,7 @@ void sec1_light_press(uint32_t delay)
     data.value.light.pressed = true;
     data.value.cmd = secplus1Codes::LightButtonPress;
     Packet pkt = Packet(PacketCommand::Light, data, id_code);
-    PacketAction pkt_ac = {pkt, true, 0};
-    pkt_ac.delay = delay;
+    PacketAction pkt_ac = {pkt, true, delay};
 
     if (!txQueuePush(&pkt_ac))
     {
@@ -2636,8 +2627,7 @@ void sec1_light_release(uint8_t howManyReleases, uint32_t delay)
     data.value.light.pressed = false;
     data.value.cmd = secplus1Codes::LightButtonRelease;
     Packet pkt = Packet(PacketCommand::Light, data, id_code);
-    PacketAction pkt_ac = {pkt, true, 0};
-    pkt_ac.delay = delay;
+    PacketAction pkt_ac = {pkt, true, delay};
 
     for (int numReleases = 0; numReleases < std::max(2, (int)howManyReleases); numReleases++)
     {
