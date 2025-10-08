@@ -293,6 +293,14 @@ enum secplus1Codes : uint8_t
     Unknown = 0xFF // (when rx fails parity test)
 };
 
+#define SEC1_CMD(s) (s == secplus1Codes::DoorButtonPress)      ? "Door Press"    \
+                    : (s == secplus1Codes::DoorButtonRelease)  ? "Door Release"  \
+                    : (s == secplus1Codes::LightButtonPress)   ? "Light Press"   \
+                    : (s == secplus1Codes::LightButtonRelease) ? "Light Release" \
+                    : (s == secplus1Codes::LockButtonPress)    ? "Lock Press"    \
+                    : (s == secplus1Codes::LockButtonRelease)  ? "Lock Release"  \
+                                                               : "Unknown"
+
 // prototypes
 void sync();
 bool process_PacketAction(PacketAction &pkt_ac);
@@ -1978,6 +1986,8 @@ bool transmitSec1(byte toSend)
             // ESP_LOGD(TAG, "WP-");
             delay(2);
         }
+
+        ESP_LOGD(TAG, "SEC1 TX: 0x%02X (%s)", toSend, SEC1_CMD(toSend));
     }
 
     // aprox 10ms to write byte
