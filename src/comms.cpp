@@ -111,7 +111,7 @@ inline bool txQueuePop(PacketAction *pkt)
 #ifdef ESP32
 #define Sec1Serial Serial2
 #else
-#define Sec1Serial sw_serial;
+#define Sec1Serial sw_serial
 #endif
 
 // used by SEC+2.0
@@ -694,8 +694,10 @@ void shutdown_comms()
         sw_serial.end();
     }
 
+#ifdef ESP32
     gpio_reset_pin(UART_TX_PIN);
     gpio_reset_pin(UART_RX_PIN);
+#endif
 }
 
 /****************************************************************************
@@ -1387,6 +1389,7 @@ bool process_send_queue()
     return true;
 }
 
+#ifdef ESP32
 void receiveErrorHandler(hardwareSerial_error_t error)
 {
     // ESP_LOGD(TAG, "-- onReceiveError: [ERR#%d:%s]", error, uartErrorStrings[error]);
@@ -1398,6 +1401,7 @@ void receiveErrorHandler(hardwareSerial_error_t error)
         // might need to post in espressif to find out
     }
 }
+#endif
 
 void comms_loop_sec1()
 {
