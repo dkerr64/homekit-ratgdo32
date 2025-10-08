@@ -426,6 +426,7 @@ void statusCallback(HS_STATUS status)
         break;
     case HS_REBOOTING:
         rebooting = true;
+        shutdown_comms();
         ESP_LOGI(TAG, "Status: Rebooting");
         break;
     case HS_FACTORY_RESET:

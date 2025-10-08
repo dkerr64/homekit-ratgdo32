@@ -695,6 +695,10 @@ void setup_comms()
  */
 void shutdown_comms()
 {
+    if (!comms_setup_done)
+        return;
+
+    comms_setup_done = false;
 #ifdef USE_GDOLIB
     // Shutdown GDO comms
     gdo_deinit();
@@ -711,8 +715,6 @@ void shutdown_comms()
     gpio_reset_pin(UART_TX_PIN);
     gpio_reset_pin(UART_RX_PIN);
 #endif
-    // This prevents loop code from running
-    comms_setup_done = false;
 #endif
 }
 
