@@ -695,6 +695,10 @@ void setup_comms()
  */
 void shutdown_comms()
 {
+#ifdef USE_GDOLIB
+    // Shutdown GDO comms
+    gdo_deinit();
+#else
     if (doorControlType == 1)
     {
         Sec1Serial.end();
@@ -703,10 +707,12 @@ void shutdown_comms()
     {
         sw_serial.end();
     }
-
 #ifdef ESP32
     gpio_reset_pin(UART_TX_PIN);
     gpio_reset_pin(UART_RX_PIN);
+#endif
+    // This prevents loop code from running
+    comms_setup_done = false;
 #endif
 }
 
