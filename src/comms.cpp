@@ -820,7 +820,6 @@ void wallPlate_Emulation()
 
         if (!wallPanelDetected && (garage_door.current_state != (GarageDoorCurrentState)0xFF || garage_door.current_lock != (LockCurrentState)0xFF))
         {
-            ESP_LOGI(TAG, "Got %d, %d, %d", wallPanelDetected, garage_door.current_state, garage_door.current_lock);
             wallPanelDetected = true;
             wallPanelBooting = false;
             ESP_LOGI(TAG, "DIGITAL Wall panel detected.");
