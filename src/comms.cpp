@@ -866,7 +866,7 @@ void wallPlate_Emulation()
         stateIndex++;
 
         // at the 1st poll item? switch rate of send
-        if (secplus1States[stateIndex] == secplus1Codes::DoorStatus && delay == SECPLUS1_TX_MINIMUM_DELAY)
+        if (delay == SECPLUS1_TX_MINIMUM_DELAY && secplus1States[stateIndex] == secplus1Codes::DoorStatus)
         {
             // switch to poll rate of 250ms
             delay = SECPLUS1_EMULATION_POLL_RATE;
@@ -1063,8 +1063,8 @@ void sec1_process_message(uint8_t key, uint8_t value = 0xFF)
     {
         // Unknown key values will be logged in default of switch statement below.
         // This logs all key/value pairs from known "poll" commands and the response from the GDO.
-        static _millis_t lastTime = 0;
         _millis_t now = _millis();
+        static _millis_t lastTime = now;
         ESP_LOGV(TAG, "SEC1 RX IDLE:%lums - MSG: 0x%02X:0x%02X", (uint32_t)(now - lastTime), key, value);
         lastTime = now;
     }
