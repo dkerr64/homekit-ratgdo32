@@ -1541,6 +1541,8 @@ void comms_loop_sec1()
                 // alternate way to detect no wall panel
                 // not in use as of now
                 // but could start emulator here
+
+                ESP_LOGV(TAG, "SEC1 RX received 10 GDO Sync bytes(0xFF)");
             }
 
             // reset start of message (just incase somehow is 2nd byte)
