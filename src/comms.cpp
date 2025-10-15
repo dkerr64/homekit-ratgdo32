@@ -119,11 +119,14 @@ SoftwareSerial sw_serial;
 
 #endif // not USE_GDOLIB
 
+// times in miliseconds
 #define SECPLUS1_DIGITAL_WALLPLATE_TIMEOUT 15000
 #define SECPLUS1_RX_MESSAGE_TIMEOUT 20
 #define SECPLUS1_TX_WINDOW_OPEN 5
 #define SECPLUS1_TX_WINDOW_CLOSE 200
 #define SECPLUS1_TX_MINIMUM_DELAY 30
+#define SECPLUS1_EMULATION_POLL_RATE 250
+
 #define SECPLUS2_TX_MINIMUM_DELAY 50
 
 #define COMMS_STATUS_TIMEOUT 2000
@@ -278,7 +281,8 @@ GarageDoorCurrentState doorState = (GarageDoorCurrentState)0xFF;
 // power up sequence + poll items for digitial wall panel 889LM
 // MJS: this is what MY 889LM exhibited when powered up (release of all buttons, and then polls)
 // MJS: the 0x53, GDO responds with 0x01 (since we dont use it, seems OK to not sent to GDO)
-byte secplus1States[] = {0x31, 0x31, 0x35, 0x35, 0x33, 0x33, 0x53, 0x53, /* POLL ITEMS --> */ 0x38, 0x3A, 0x39, 0x3A};
+byte secplus1States[] = {0x31, 0x31, 0x31, 0x31, 0x35, 0x35, 0x33, 0x33, 0x53, 0x53, 0x38, 0x3A, 0x3A, 0x3A, 0x39, 0x38, 0x3A, 
+                         /* POLL ITEMS --> */ 0x38, 0x3A, 0x39, 0x3A};
 #define SECPLUS1_POLL_ITEMS 4 // poll last x items at end of secplus1States[]
 
 // values for SECURITY+1.0 communication
@@ -846,9 +850,10 @@ void wallPlate_Emulation()
     static _millis_t lastRequestMillis = 0;
     static _millis_t startMillis = currentMillis;
     static bool emulateWallPanel = false;
+    static uint8_t delay = SECPLUS1_TX_MINIMUM_DELAY;
 
-    // transmit every 250ms
-    if (emulateWallPanel && (currentMillis - lastRequestMillis) > 250)
+    // transmit every x ms
+    if (emulateWallPanel && (currentMillis - lastRequestMillis) > delay)
     {
         static uint8_t stateIndex = 0;
         lastRequestMillis = currentMillis;
@@ -859,8 +864,18 @@ void wallPlate_Emulation()
 
         // set next poll
         stateIndex++;
+
+        // at 1st poll item? switch rate of send
+        if (secplus1States[stateIndex] == 0x38 && delay == SECPLUS1_TX_MINIMUM_DELAY)
+        {
+            // switch to poll rate of 250ms
+            delay = SECPLUS1_EMULATION_POLL_RATE;
+        }
+
+        // at the end?
         if (stateIndex == sizeof(secplus1States))
         {
+            // loop back for polls
             stateIndex = sizeof(secplus1States) - SECPLUS1_POLL_ITEMS;
         }
         return;
