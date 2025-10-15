@@ -282,7 +282,7 @@ GarageDoorCurrentState doorState = (GarageDoorCurrentState)0xFF;
 // MJS: this is what MY 889LM exhibited when powered up (release of all buttons, and then polls)
 // MJS/DK: added in additional 0x31's & 0x35's hopefully to aid older GDO to sync up
 // MJS: the 0x53, GDO responds with 0x01 (we dont use response)
-byte secplus1States[] = {0x31, 0x31, 0x31, 0x31, 0x35, 0x35, 0x35, 0x35, 0x33, 0x33, 0x53, 0x53, 0x38, 0x3A, 0x3A, 0x3A, 0x39, 
+byte secplus1States[] = {0x31, 0x31, 0x31, 0x31, 0x35, 0x35, 0x35, 0x35, 0x33, 0x33, 0x53, 0x53, 0x38, 0x3A, 0x3A, 0x3A, 0x39,
                          /* POLL ITEMS --> */ 0x38, 0x3A, 0x39, 0x3A};
 #define SECPLUS1_POLL_ITEMS 4 // poll last x items at end of secplus1States[]
 
@@ -296,16 +296,18 @@ enum secplus1Codes : uint8_t
     LockButtonPress = 0x34,
     LockButtonRelease = 0x35,
 
-    Unknown_0x36 = 0x36,
-    QueryDoorStatus_0x37 = 0x37, // sent by a "0x37" wall panel
+    // sent by a "0x37" wall panel, and unable to actually get a status from returned byte
+    QueryDoorStatus_0x37 = 0x37,
 
-    DoorStatus = 0x38,
-    ObstructionStatus = 0x39,
-    LightLockStatus = 0x3A,
-
-    DoorMovingStatus = 0x40, // sent by a "0x37" wall panel
-
-    UnknownStatus_0x53 = 0x53, // sent by a "0x37" wall panel and WP when done its "power up"
+    QueryDoorStatus = 0x38,
+    QueryObstructionStatus = 0x39,
+    QueryLightLockStatus = 0x3A,
+    
+    // sent by a "0x37" wall panel
+    QueryDoorMovingStatus = 0x40, 
+    
+    // sent by wall panel at the end of its "release" button sequence
+    QueryUnknownStatus_0x53 = 0x53, 
 
     Unknown = 0xFF // (when rx fails parity test)
 };
@@ -867,7 +869,7 @@ void wallPlate_Emulation()
         stateIndex++;
 
         // at the 1st poll item? switch rate of send
-        if (delay == SECPLUS1_TX_MINIMUM_DELAY && secplus1States[stateIndex] == secplus1Codes::DoorStatus)
+        if (delay == SECPLUS1_TX_MINIMUM_DELAY && secplus1States[stateIndex] == secplus1Codes::QueryDoorStatus)
         {
             // switch to poll rate of 250ms
             delay = SECPLUS1_EMULATION_POLL_RATE;
@@ -1129,7 +1131,7 @@ void sec1_process_message(uint8_t key, uint8_t value = 0xFF)
     }
 
     // Door moving - only seen with 0x37 panels
-    case secplus1Codes::DoorMovingStatus:
+    case secplus1Codes::QueryDoorMovingStatus:
     {
         static uint8_t previous = 0xFF;
         if (value != previous)
@@ -1157,7 +1159,7 @@ void sec1_process_message(uint8_t key, uint8_t value = 0xFF)
     }
 
     // Unknown status packet
-    case secplus1Codes::UnknownStatus_0x53:
+    case secplus1Codes::QueryUnknownStatus_0x53:
     {
         static uint8_t previous = 0xFF;
         if (value != previous)
@@ -1202,7 +1204,7 @@ void sec1_process_message(uint8_t key, uint8_t value = 0xFF)
             if (door_moving || (_millis() - last_status_query > 10000))
             {
                 // Write directly rather than go through all checking done by transmitSec1()
-                sw_serial.write(secplus1Codes::DoorStatus);
+                sw_serial.write(secplus1Codes::QueryDoorStatus);
                 // timestamp tx
                 last_tx = last_status_query = _millis();
             }
@@ -1212,7 +1214,7 @@ void sec1_process_message(uint8_t key, uint8_t value = 0xFF)
     }
 
     // door status
-    case secplus1Codes::DoorStatus:
+    case secplus1Codes::QueryDoorStatus:
     {
         // 0x5X = stopped
         // 0x0X = moving
@@ -1293,7 +1295,7 @@ void sec1_process_message(uint8_t key, uint8_t value = 0xFF)
     }
 
     // obstruction states
-    case secplus1Codes::ObstructionStatus:
+    case secplus1Codes::QueryObstructionStatus:
     {
         // 0x00         No obstruction
         // 0x00 -> 0x04 Obstruction beam broken, implies motion
@@ -1330,7 +1332,7 @@ void sec1_process_message(uint8_t key, uint8_t value = 0xFF)
     }
 
     // light & lock
-    case secplus1Codes::LightLockStatus:
+    case secplus1Codes::QueryLightLockStatus:
     {
         // only use for real sec1 comms debugging, its just too chatty
         // ESP_LOGD(TAG, "SEC1 RX 0x3A value: 0x%02X", value);
@@ -1599,11 +1601,11 @@ void comms_loop_sec1()
         }
         // Double byte... Commands sent by a wall panel or ourselves, plus reply from GDO...
         case secplus1Codes::QueryDoorStatus_0x37:
-        case secplus1Codes::DoorMovingStatus:
-        case secplus1Codes::UnknownStatus_0x53:
-        case secplus1Codes::DoorStatus:
-        case secplus1Codes::ObstructionStatus:
-        case secplus1Codes::LightLockStatus:
+        case secplus1Codes::QueryDoorMovingStatus:
+        case secplus1Codes::QueryUnknownStatus_0x53:
+        case secplus1Codes::QueryDoorStatus:
+        case secplus1Codes::QueryObstructionStatus:
+        case secplus1Codes::QueryLightLockStatus:
         {
             // if we already waiting for a GDO response, and got a new poll...
             if (reading_msg)
@@ -2034,9 +2036,9 @@ bool transmitSec1(byte toSend)
     }
 
     // sending a poll (889LM emulation)
-    bool poll_cmd = (toSend == secplus1Codes::DoorStatus) || (toSend == secplus1Codes::ObstructionStatus) || (toSend == secplus1Codes::LightLockStatus);
+    bool poll_cmd = (toSend == secplus1Codes::QueryDoorStatus) || (toSend == secplus1Codes::QueryObstructionStatus) || (toSend == secplus1Codes::QueryLightLockStatus);
     // one time poll from (889LM emulation) at end of "power up sequence"
-    poll_cmd = poll_cmd || (toSend == secplus1Codes::UnknownStatus_0x53);
+    poll_cmd = poll_cmd || (toSend == secplus1Codes::QueryUnknownStatus_0x53);
     // if not a poll command (and polls are only with wall panel emulation enabled),
     // disable disable rx (allows for cleaner tx, and no echo)
     if (!poll_cmd)
@@ -2679,7 +2681,7 @@ void sec1_light_press(uint32_t delay)
     // this better emulates wall panel
     if (garage_door.wallPanelEmulated)
     {
-        sec1_poll_status(secplus1Codes::LightLockStatus);
+        sec1_poll_status(secplus1Codes::QueryLightLockStatus);
     }
 }
 
