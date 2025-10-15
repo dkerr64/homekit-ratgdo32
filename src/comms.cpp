@@ -866,7 +866,7 @@ void wallPlate_Emulation()
         stateIndex++;
 
         // at the 1st poll item? switch rate of send
-        if (stateIndex == (sizeof(secplus1States) - SECPLUS1_POLL_ITEMS) && delay == SECPLUS1_TX_MINIMUM_DELAY)
+        if (secplus1States[stateIndex] == secplus1Codes::DoorStatus && delay == SECPLUS1_TX_MINIMUM_DELAY)
         {
             // switch to poll rate of 250ms
             delay = SECPLUS1_EMULATION_POLL_RATE;
