@@ -280,8 +280,8 @@ GarageDoorCurrentState doorState = (GarageDoorCurrentState)0xFF;
 
 // power up sequence + poll items for digitial wall panel 889LM
 // MJS: this is what MY 889LM exhibited when powered up (release of all buttons, and then polls)
-// MJS: the 0x53, GDO responds with 0x01 (since we dont use it, seems OK to not sent to GDO)
-byte secplus1States[] = {0x31, 0x31, 0x31, 0x31, 0x35, 0x35, 0x33, 0x33, 0x53, 0x53, 0x38, 0x3A, 0x3A, 0x3A, 0x39, 0x38, 0x3A, 
+// MJS: the 0x53, GDO responds with 0x01 (we dont use response)
+byte secplus1States[] = {0x31, 0x31, 0x31, 0x31, 0x35, 0x35, 0x33, 0x33, 0x53, 0x53, 0x38, 0x3A, 0x3A, 0x3A, 0x39, 
                          /* POLL ITEMS --> */ 0x38, 0x3A, 0x39, 0x3A};
 #define SECPLUS1_POLL_ITEMS 4 // poll last x items at end of secplus1States[]
 
@@ -865,8 +865,8 @@ void wallPlate_Emulation()
         // set next poll
         stateIndex++;
 
-        // at 1st poll item? switch rate of send
-        if (secplus1States[stateIndex] == 0x38 && delay == SECPLUS1_TX_MINIMUM_DELAY)
+        // at the 1st poll item? switch rate of send
+        if (stateIndex == (sizeof(secplus1States) - SECPLUS1_POLL_ITEMS) && delay == SECPLUS1_TX_MINIMUM_DELAY)
         {
             // switch to poll rate of 250ms
             delay = SECPLUS1_EMULATION_POLL_RATE;
