@@ -143,6 +143,7 @@ static bool door_moving = false;
 // For Time-to-close control
 static const uint32_t TTCinterval = 250;
 static uint32_t TTCiterations = 0;
+static _millis_t TTCendTime = 0;
 static Ticker TTCtimer = Ticker();
 static Ticker callbackDelay = Ticker();
 static Ticker checkDoorMoving = Ticker();
@@ -2513,6 +2514,7 @@ void delayFnCall(uint32_t ms, void (*callback)())
     TTCiterations = ms / TTCinterval;  // Number of times to go through loop
     TTCwasLightOn = garage_door.light; // Current state of light
     ESP_LOGI(TAG, "Start function delay timer for %lums (%d iterations)", ms, TTCiterations);
+    TTCendTime = _millis() + (_millis_t)ms;
     TTCtimer.attach_ms(TTCinterval, [callback, light]()
                        {
 #ifdef ESP8266
@@ -2832,9 +2834,12 @@ void manual_recovery()
     }
 }
 
-bool is_ttc_active()
+uint32_t is_ttc_active()
 {
-    return TTCtimer.active();
+    if (!TTCtimer.active())
+        return 0;
+
+    return (uint32_t)std::max((int32_t)0, (int32_t)(TTCendTime - _millis()));
 }
 
 #ifndef USE_GDOLIB
