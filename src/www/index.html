@@ -137,11 +137,12 @@
             </colgroup>
             <tr>
               <td colspan="2">Door State:</td>
-              <td id="garageDoorState"></td>
+              <td>
+                <span id="garageDoorState"></span><span id="ttcActive" style="font-size: 0.6em; display: none;">&nbsp;(Delay)</span>
+              </td>
               <td colspan="3">Obstruction:</td>
               <td>
-                <span id="garageObstructed"></span>
-                <span id="pinBasedObst" style="font-size: 0.6em">(pin)</span>
+                <span id="garageObstructed"></span><span id="pinBasedObst" style="font-size: 0.6em">&nbsp;(Pin-based)</span>
               </td>
             </tr>
             <tr id="lockLightRow">
@@ -193,7 +194,7 @@
           <input type="button" id="lightButton" value="Light On" style="width: 23%;"
             onclick="setGDO('garageLightOn', (event.target.value === 'Light On') ? '1' : '0');">
           <input type="button" id="doorButton" value="Open Door" style="width: 23%;"
-            onclick="setGDO('garageDoorState', (event.target.value === 'Open Door') ? '1' : '0');">
+            onclick="setGDO('garageDoorState', (event.target.value === 'Close Door') ? '0' : '1');">
           <input type="button" id="lockButton" value="Lock Remotes" style="width: 23%;"
             onclick="setGDO('garageLockState', (event.target.value === 'Disable Remotes') ? '1' : '0');">
           <input type="button" id="laserButton" value="Laser On" style="display:none; width: 23%;"

@@ -27,6 +27,7 @@
   "garageLockState": "Disabled",
   "garageMotion": false,
   "garageObstructed": false,
+  "ttcActive": false,
   "pinBasedObst": true,
   "passwordRequired": true,
   "rebootSeconds": 0,
