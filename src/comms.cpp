@@ -2839,7 +2839,7 @@ uint32_t is_ttc_active()
     if (!TTCtimer.active())
         return 0;
 
-    return (uint32_t)std::max((int32_t)0, (int32_t)(TTCendTime - _millis()));
+    return (uint32_t)std::max((int32_t)1, (int32_t)((TTCendTime + 1000 - _millis()) / 1000));
 }
 
 #ifndef USE_GDOLIB
