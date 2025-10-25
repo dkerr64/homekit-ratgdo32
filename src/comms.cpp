@@ -2832,6 +2832,11 @@ void manual_recovery()
     }
 }
 
+bool is_ttc_active()
+{
+    return TTCtimer.active();
+}
+
 #ifndef USE_GDOLIB
 /*************************** OBSTRUCTION DETECTION **************************
  *
