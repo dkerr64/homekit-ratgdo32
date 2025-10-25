@@ -550,7 +550,7 @@ function setElementsFromStatus(status) {
             case "ttcActive":
                 if (value) {
                     document.getElementById("garageDoorState").innerHTML = "Closing";
-                    document.getElementById(key).innerHTML = `&nbsp;(Delay&nbsp;${value})`;
+                    document.getElementById(key).innerHTML = "&nbsp;in&nbsp;${value}";
                     document.getElementById(key).style.display = "";
                     document.getElementById("doorButton").value = "Cancel Close";
                 }
