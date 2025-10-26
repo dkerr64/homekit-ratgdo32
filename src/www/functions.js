@@ -556,8 +556,8 @@ function setElementsFromStatus(status) {
                 }
                 else {
                     document.getElementById(key).style.display = "none";
-                    state = capitalizeFirstLetter(status.garageDoorState ? status.garageDoorState : "Closed");
-                    //document.getElementById("garageDoorState").innerHTML = state;
+                    state = capitalizeFirstLetter(status.garageDoorState ? status.garageDoorState : "Closing");
+                    document.getElementById("garageDoorState").innerHTML = state;
                     document.getElementById("doorButton").value = (state == "Closed" || state == "Closing") ? "Open Door" : "Close Door";
                 }
                 break;
