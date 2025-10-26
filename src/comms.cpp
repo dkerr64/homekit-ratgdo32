@@ -971,6 +971,8 @@ void update_door_state(GarageDoorCurrentState current_state)
         {
             ESP_LOGI(TAG, "Door closing, canceling TTC delay timer");
             TTCtimer.detach();
+            // This will force us to send current state to browser, so it reports correct state.
+            last_reported_garage_door.current_state = (GarageDoorCurrentState)0xFF;
         }
         // Fall through to "opening"
     case GarageDoorCurrentState::CURR_OPENING:
@@ -2404,6 +2406,8 @@ GarageDoorCurrentState open_door()
         TTCtimer.detach();
         // Reset light to state it was at before delay start.
         set_light(TTCwasLightOn);
+        // This will force us to send current state to browser, so it reports correct state.
+        last_reported_garage_door.current_state = (GarageDoorCurrentState)0xFF;
         return GarageDoorCurrentState::CURR_OPEN;
     }
 
@@ -2838,7 +2842,7 @@ uint32_t is_ttc_active()
 {
     if (!TTCtimer.active())
         return 0;
-
+    // return number of seconds remaining in the time-to-close timer
     return (uint32_t)std::max((int32_t)1, (int32_t)((TTCendTime + 1000 - _millis()) / 1000));
 }
 
