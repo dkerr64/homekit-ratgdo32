@@ -1673,8 +1673,13 @@ void comms_loop_sec2()
         static _millis_t lastStatusPkt = 0;
         // We have a full packet, process it.
         Packet pkt = Packet(reader.fetch_buf());
-        // Log the received packet
-        pkt.print();
+
+        if ((esp_log_level_t)userConfig->getLogLevel() <= esp_log_level_t::ESP_LOG_INFO)
+        {
+            // If log level is Debug or higher then Packet() will have already logged it.
+            // This one logs at Info level.
+            pkt.print();
+        }
 
         switch (pkt.m_pkt_cmd)
         {
@@ -1928,28 +1933,41 @@ void comms_loop_sec2()
             break;
         }
 
+        case PacketCommand::SetTtc:
+        {
+            // Received in confirmation of a SetTtc.
+            ESP_LOGI(TAG, "Someone else set built-in TTC to %d seconds", pkt.m_data.value.set_ttc.seconds);
+            break;
+        }
+
+        case PacketCommand::UpdateTtc:
+        {
+            // Received in confirmation of a SetTtc.
+            ESP_LOGI(TAG, "Someone else updated built-in TTC to %d seconds", pkt.m_data.value.update_ttc.seconds);
+            break;
+        }
+
+        case PacketCommand::CancelTtc:
+        {
+            // Received in confirmation of a SetTtc.
+            ESP_LOGI(TAG, "Someone else canceled built-in TTC");
+            break;
+        }
+
+        case PacketCommand::Pair2Resp:
+        {
+            // Received in confirmation of a SetTtc.
+            ESP_LOGI(TAG, "Garage door acknowledging set built-in TTC to %d seconds", pkt.m_data.value.pair2resp.seconds);
+            break;
+        }
+
         case PacketCommand::Pair3Resp:
         {
-            // Only use Pair3Resp for obstruction detection if no sensor detected
-            if (!garage_door.pinModeObstructionSensor)
-            {
-                // Use Pair3Resp packets for obstruction detection via parity
-                // byte1 9 = clear, byte1 14 = obstructed
-                bool currently_obstructed = ((pkt.m_data.value.no_data.no_bits_set >> 16) & 0xFF) == 14;
-                // Only update if obstruction state has changed
-                if (garage_door.obstructed != currently_obstructed)
-                {
-                    ESP_LOGI(TAG, "Obstruction: %s (Pair3Resp) (%s)", currently_obstructed ? "Obstructed" : "Clear", timeString());
-                    // Notify HomeKit of the state change
-                    notify_homekit_obstruction(currently_obstructed);
-                    digitalWrite(STATUS_OBST_PIN, !currently_obstructed);
-                    // Trigger motion detection if enabled
-                    if (currently_obstructed && motionTriggers.bit.obstruction)
-                    {
-                        notify_homekit_motion(true);
-                    }
-                }
-            }
+            // Received in confirmation of some other action, e.g. CancelTtc.
+            // But we also see when obstruction beam is broken/clear
+            // And when built-in TTC starts/ends its flashing.
+            ESP_LOGI(TAG, "Pair3Resp update: Byte1 0x%02X, Byte2 0x%02X, Flags 0x%X", pkt.m_data.value.pair3resp.byte1,
+                     pkt.m_data.value.pair3resp.byte2, pkt.m_data.value.pair3resp.flags);
             break;
         }
 
@@ -1957,9 +1975,9 @@ void comms_loop_sec2()
         {
             // Typically occurs if there is a fail-to-decode packet error.  This could be a regular status update.
             // If it has been more than 5 minutes since the last status packet then request GDO to resend one.
-            if (_millis() - lastStatusPkt > (5 * 60 * 1000))
+            if (_millis() - lastStatusPkt > (5 * 60 * 1000) || lastStatusPkt == 0)
             {
-                ESP_LOGD(TAG,"Missed a status packet, requsting GDO to resend");
+                ESP_LOGD(TAG, "Missed a status packet, requsting GDO to resend");
                 send_get_status();
             }
             break;
@@ -2613,7 +2631,61 @@ void send_get_openings()
     PacketAction pkt_ac = {pkt, true, 0};
     if (!txQueuePush(&pkt_ac))
     {
-        ESP_LOGE(TAG, "packet queue full, dropping get status pkt");
+        ESP_LOGE(TAG, "packet queue full, dropping get openings pkt");
+    }
+}
+
+void send_cancel_ttc()
+{
+    // only used with SECURITY2.0
+    if (doorControlType != 2)
+        return;
+
+    PacketData d;
+    d.type = PacketDataType::CancelTtc;
+    d.value.cancel_ttc.state = CancelTtcState::Cancel;
+    d.value.cancel_ttc.flags = 0x01;
+    Packet pkt = Packet(PacketCommand::CancelTtc, d, id_code);
+    PacketAction pkt_ac = {pkt, true, 0};
+    if (!txQueuePush(&pkt_ac))
+    {
+        ESP_LOGE(TAG, "packet queue full, dropping cancel ttc pkt");
+    }
+}
+
+void send_set_ttc(uint16_t seconds)
+{
+    // only used with SECURITY2.0
+    if (doorControlType != 2)
+        return;
+
+    PacketData d;
+    d.type = PacketDataType::SetTtc;
+    d.value.set_ttc.seconds = seconds;
+    d.value.set_ttc.flags = 0x01;
+    Packet pkt = Packet(PacketCommand::SetTtc, d, id_code);
+    PacketAction pkt_ac = {pkt, true, 0};
+    if (!txQueuePush(&pkt_ac))
+    {
+        ESP_LOGE(TAG, "packet queue full, dropping set ttc pkt");
+    }
+}
+
+void send_update_ttc(uint16_t seconds)
+{
+    // only used with SECURITY2.0
+    if (doorControlType != 2)
+        return;
+
+    PacketData d;
+    d.type = PacketDataType::UpdateTtc;
+    d.value.update_ttc.seconds = seconds;
+    d.value.update_ttc.flags = 0x01;
+    Packet pkt = Packet(PacketCommand::UpdateTtc, d, id_code);
+    PacketAction pkt_ac = {pkt, true, 0};
+    if (!txQueuePush(&pkt_ac))
+    {
+        ESP_LOGE(TAG, "packet queue full, dropping set ttc pkt");
     }
 }
 #endif
