@@ -122,7 +122,7 @@ const gpio_num_t DRY_CONTACT_CLOSE_PIN = (gpio_num_t)DRY_CONTACT_CLOSE_GPIO; // 
 #ifndef DRY_CONTACT_LIGHT_GPIO
 #define DRY_CONTACT_LIGHT_GPIO GPIO_NUM_27
 #endif
-const gpio_num_t DRY_CONTACT_LIGHT_PIN = (gpio_num_t)DRY_CONTACT_LIGHT_GPIO; // toggle light !!! not coded
+const gpio_num_t DRY_CONTACT_LIGHT_PIN = (gpio_num_t)DRY_CONTACT_LIGHT_GPIO; // toggle light
 #ifndef STATUS_DOOR_GPIO
 #define STATUS_DOOR_GPIO GPIO_NUM_26
 #endif
