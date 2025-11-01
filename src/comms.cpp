@@ -1935,29 +1935,32 @@ void comms_loop_sec2()
 
         case PacketCommand::SetTtc:
         {
-            // Received in confirmation of a SetTtc.
             ESP_LOGI(TAG, "Someone else set built-in TTC to %d seconds", pkt.m_data.value.set_ttc.seconds);
+            garage_door.builtInTTC = pkt.m_data.value.set_ttc.seconds;
+            userConfig->set(cfg_builtInTTC, pkt.m_data.value.set_ttc.seconds);
+            ESP8266_SAVE_CONFIG();
             break;
         }
 
         case PacketCommand::UpdateTtc:
         {
-            // Received in confirmation of a SetTtc.
             ESP_LOGI(TAG, "Someone else updated built-in TTC to %d seconds", pkt.m_data.value.update_ttc.seconds);
             break;
         }
 
         case PacketCommand::CancelTtc:
         {
-            // Received in confirmation of a SetTtc.
             ESP_LOGI(TAG, "Someone else canceled built-in TTC");
+            garage_door.builtInTTC = 0;
+            userConfig->set(cfg_builtInTTC, 0);
+            ESP8266_SAVE_CONFIG();
             break;
         }
 
         case PacketCommand::Pair2Resp:
         {
             // Received in confirmation of a SetTtc.
-            ESP_LOGI(TAG, "Garage door acknowledging set built-in TTC to %d seconds", pkt.m_data.value.pair2resp.seconds);
+            // ESP_LOGI(TAG, "Garage door acknowledging set built-in TTC to %d seconds", pkt.m_data.value.pair2resp.seconds);
             break;
         }
 
@@ -1966,8 +1969,8 @@ void comms_loop_sec2()
             // Received in confirmation of some other action, e.g. CancelTtc.
             // But we also see when obstruction beam is broken/clear
             // And when built-in TTC starts/ends its flashing.
-            ESP_LOGI(TAG, "Pair3Resp update: Byte1 0x%02X, Byte2 0x%02X, Flags 0x%X", pkt.m_data.value.pair3resp.byte1,
-                     pkt.m_data.value.pair3resp.byte2, pkt.m_data.value.pair3resp.flags);
+            // ESP_LOGI(TAG, "Pair3Resp update: Byte1 0x%02X, Byte2 0x%02X, Flags 0x%X", pkt.m_data.value.pair3resp.byte1,
+            //         pkt.m_data.value.pair3resp.byte2, pkt.m_data.value.pair3resp.flags);
             break;
         }
 
