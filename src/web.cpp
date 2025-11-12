@@ -111,6 +111,7 @@ const std::unordered_map<std::string, std::pair<const HTTPMethod, void (*)()>> b
 ESP8266WebServer server(80);
 #else
 WebServer server(80);
+DNSServer dnsServer;
 #endif
 
 // Local copy of door status
