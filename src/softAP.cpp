@@ -20,6 +20,11 @@
 #include "softAP.h"
 #include "web.h"
 #include "provision.h"
+#ifdef ESP32
+#include <DNSServer.h>
+DNSServer dnsServer;
+#else
+#endif
 
 // Logger tag
 static const char *TAG = "ratgdo-softAP";

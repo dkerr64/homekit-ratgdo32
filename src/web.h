@@ -22,8 +22,6 @@
 #define PROGMEM // so it is no-op in webcontent.h
 #include <WebServer.h>
 extern WebServer server;
-#include <DNSServer.h>
-extern DNSServer dnsServer;
 #else
 #include <ESP8266WebServer.h>
 extern ESP8266WebServer server;
