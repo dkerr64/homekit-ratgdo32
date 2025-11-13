@@ -13,6 +13,9 @@
  *
  */
 
+// Arduino system includes
+#include <DNSServer.h>
+
 // RATGDO project includes
 #include "ratgdo.h"
 #include "utilities.h"
@@ -40,6 +43,8 @@ void handle_wifinets();
 
 #define MAX_ATTEMPTS_WIFI_CONNECTION 30
 #define TXT_BUFFER_SIZE 1024
+
+DNSServer dnsServer;
 
 // support for scaning WiFi networks
 bool wifiNetsCmp(const wifiNet_t &a, const wifiNet_t &b)
@@ -160,9 +165,18 @@ void start_soft_ap()
         ESP_LOGI(TAG, "Error starting AP mode");
     }
 
+    // any dns request will point to us
+    dnsServer.start(53, "*", WiFi.softAPIP());
+
     server.onNotFound(handle_softAPweb);
     server.begin();
     ESP_LOGI(TAG, "Soft AP web server started");
+
+#ifdef ESP32
+    // used in Android 11+ (but docs suggest it will fall back to http probe)
+    WiFi.AP.enableDhcpCaptivePortal();
+#endif
+
     softAPinitialized = true;
 }
 
@@ -175,6 +189,10 @@ void soft_ap_loop()
 
     if (!softAPmode)
         return;
+
+#ifdef ESP8266
+    dnsServer.processNextRequest();
+#endif
 
     static _millis_t soft_ap_start = 0;
     static bool soft_ap_timer_started = false;
@@ -193,6 +211,13 @@ void soft_ap_loop()
     }
 }
 
+void doRedirect()
+{
+    // Redirect to root
+    server.sendHeader(F("Location"), F("/"), true);
+    server.send_P(302, "text/plain", "");
+}
+
 void handle_softAPweb()
 {
     HTTPMethod method = server.method();
@@ -202,7 +227,44 @@ void handle_softAPweb()
     {
         // If we are in Soft Access Point mode
         ESP_LOGI(TAG, "WiFi Soft Access Point mode requesting: %s", page.c_str());
-        if (page.equals("/") || page.equals("/wifiap"))
+
+        // captive portal probes
+        // apple (ios)
+        if (page.equals("/hotspot-detect.html"))
+        {
+            ESP_LOGI(TAG, "Captive-Portal (apple) request redirecting to root");
+            doRedirect();
+        }
+        // android
+        else if (page.equals("/generate_204"))
+        {
+            ESP_LOGI(TAG, "Captive-Portal (android) request redirecting to root");
+            doRedirect();
+        }
+        // amazon fire (kindle)
+        else if (page.equals("/kindle-wifi/wifistub.html"))
+        {
+            ESP_LOGI(TAG, "Captive-Portal (kindle-wifi) request redirecting to root");
+            doRedirect();
+        }
+
+        /*
+        // windows (redirect)
+        else if (page.equals("/redirect"))
+            handle_softAPPortal();
+        // windows 10+
+        else if (page.equals("/connecttest.txt"))
+        {
+            // windows 11 workaround
+            // server.sendHeader("Location", "http://logout.net", true);
+            // server.send_P(302, "text/plain", "");
+
+            server.send_P(200, "text/plain", "Microsoft Connect Test");
+        }
+        */
+
+        // our pages
+        else if (page.equals("/") || page.equals("/wifiap"))
             return handle_wifiap();
         else if (page.equals("/wifinets"))
             return handle_wifinets();
