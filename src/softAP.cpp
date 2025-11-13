@@ -13,6 +13,9 @@
  *
  */
 
+// Arduino system includes
+#include <DNSServer.h>
+
 // RATGDO project includes
 #include "ratgdo.h"
 #include "utilities.h"
@@ -20,11 +23,6 @@
 #include "softAP.h"
 #include "web.h"
 #include "provision.h"
-#ifdef ESP32
-#include <DNSServer.h>
-DNSServer dnsServer;
-#else
-#endif
 
 // Logger tag
 static const char *TAG = "ratgdo-softAP";
@@ -45,6 +43,8 @@ void handle_wifinets();
 
 #define MAX_ATTEMPTS_WIFI_CONNECTION 30
 #define TXT_BUFFER_SIZE 1024
+
+DNSServer dnsServer;
 
 // support for scaning WiFi networks
 bool wifiNetsCmp(const wifiNet_t &a, const wifiNet_t &b)
@@ -167,12 +167,15 @@ void start_soft_ap()
 
     // any dns request will point to us
     dnsServer.start(53, "*", WiFi.softAPIP());
-    
+
     server.onNotFound(handle_softAPweb);
     server.begin();
     ESP_LOGI(TAG, "Soft AP web server started");
 
+#ifdef ESP32
+    // used in Android 11+ (but docs suggest it will fall back to http probe)
     WiFi.AP.enableDhcpCaptivePortal();
+#endif
 
     softAPinitialized = true;
 }
@@ -186,6 +189,10 @@ void soft_ap_loop()
 
     if (!softAPmode)
         return;
+
+#ifdef ESP8266
+    dnsServer.processNextRequest();
+#endif
 
     static _millis_t soft_ap_start = 0;
     static bool soft_ap_timer_started = false;
