@@ -36,6 +36,12 @@ static const char softAPtableRow[] PROGMEM = R"(
 <tr %s><td><input type='radio' name='net' value='%d' %s></td><td>%s</td><td>%ddBm</td><td>%d</td><td>&nbsp;&nbsp;%02x:%02x:%02x:%02x:%02x:%02x</td></tr>)";
 static const char softAPtableLastRow[] PROGMEM = R"(
 <tr><td><input type='radio' name='net' value='%d'></td><td colspan='2'><input type='text' name='userSSID' placeholder='SSID' value='%s'></td></tr>)";
+static const char softAPsuccess[] PROGMEM = R"(
+<html>
+ <head><title>Success</title></head>
+ <body>Success</body>
+ <script type="text/javascript">window.location.href = "\wifiap";</script>
+</html>)";
 
 // forward declare functions
 void handle_softAPweb();
@@ -214,7 +220,7 @@ void soft_ap_loop()
 void doRedirect()
 {
     // Redirect to root
-    server.sendHeader(F("Location"), F("/"), true);
+    server.sendHeader(F("Location"), F("/captive"), true);
     server.send_P(302, "text/plain", "");
 }
 
@@ -223,59 +229,81 @@ void handle_softAPweb()
     HTTPMethod method = server.method();
     String page = server.uri();
 
-    if ((WiFi.getMode() & WIFI_AP) == WIFI_AP)
+    if ((WiFi.getMode() & WIFI_AP) != WIFI_AP)
+        return;
+
+    // If we are in Soft Access Point mode
+    // ESP_LOGI(TAG, "WiFi Soft Access Point mode requesting: %s", page.c_str());
+
+    // captive portal probes
+    // apple (ios)
+    if (page.equals("/hotspot-detect.html"))
     {
-        // If we are in Soft Access Point mode
-        ESP_LOGI(TAG, "WiFi Soft Access Point mode requesting: %s", page.c_str());
+        ESP_LOGI(TAG, "Captive-Portal (apple) request redirecting");
+        return doRedirect();
+    }
+    // android
+    else if (page.equals("/generate_204"))
+    {
+        ESP_LOGI(TAG, "Captive-Portal (android) request redirecting");
+        return doRedirect();
+    }
+    // amazon fire (kindle)
+    else if (page.equals("/kindle-wifi/wifistub.html"))
+    {
+        ESP_LOGI(TAG, "Captive-Portal (kindle-wifi) request redirecting");
+        return doRedirect();
+    }
+    else if (page.equals("/captive"))
+    {
+        server.send_P(200, type_html, softAPsuccess);
+        ESP_LOGD(TAG, "Sent captive success");
+        return;
+    }
 
-        // captive portal probes
-        // apple (ios)
-        if (page.equals("/hotspot-detect.html"))
-        {
-            ESP_LOGI(TAG, "Captive-Portal (apple) request redirecting to root");
-            doRedirect();
-        }
-        // android
-        else if (page.equals("/generate_204"))
-        {
-            ESP_LOGI(TAG, "Captive-Portal (android) request redirecting to root");
-            doRedirect();
-        }
-        // amazon fire (kindle)
-        else if (page.equals("/kindle-wifi/wifistub.html"))
-        {
-            ESP_LOGI(TAG, "Captive-Portal (kindle-wifi) request redirecting to root");
-            doRedirect();
-        }
+    /*
+    // windows (redirect)
+    else if (page.equals("/redirect"))
+        handle_softAPPortal();
+    // windows 10+
+    else if (page.equals("/connecttest.txt"))
+    {
+        // windows 11 workaround
+        // server.sendHeader("Location", "http://logout.net", true);
+        // server.send_P(302, "text/plain", "");
 
-        /*
-        // windows (redirect)
-        else if (page.equals("/redirect"))
-            handle_softAPPortal();
-        // windows 10+
-        else if (page.equals("/connecttest.txt"))
-        {
-            // windows 11 workaround
-            // server.sendHeader("Location", "http://logout.net", true);
-            // server.send_P(302, "text/plain", "");
+        server.send_P(200, "text/plain", "Microsoft Connect Test");
+    }
+    */
 
-            server.send_P(200, "text/plain", "Microsoft Connect Test");
-        }
-        */
-
-        // our pages
-        else if (page.equals("/") || page.equals("/wifiap"))
-            return handle_wifiap();
-        else if (page.equals("/wifinets"))
-            return handle_wifinets();
-        else if (page.equals("/setssid") && method == HTTP_POST)
-            return handle_setssid();
-        else if (page.equals("/reboot") && method == HTTP_POST)
-            return handle_reboot();
-        else if (page.equals("/rescan") && method == HTTP_POST)
-            return handle_rescan();
-        else
-            return handle_notfound();
+    // our pages
+    else if (page.equals("/") || page.equals("/wifiap"))
+    {
+        return handle_wifiap();
+    }
+    else if (page.equals("/wifiap.css"))
+    {
+        return load_page("/wifiap.css");
+    }
+    else if (page.equals("/wifinets"))
+    {
+        return handle_wifinets();
+    }
+    else if (page.equals("/setssid") && method == HTTP_POST)
+    {
+        return handle_setssid();
+    }
+    else if (page.equals("/reboot") && method == HTTP_POST)
+    {
+        return handle_reboot();
+    }
+    else if (page.equals("/rescan") && method == HTTP_POST)
+    {
+        return handle_rescan();
+    }
+    else
+    {
+        return handle_notfound();
     }
 }
 
