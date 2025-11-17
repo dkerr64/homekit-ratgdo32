@@ -257,12 +257,6 @@ void handle_softAPweb()
         }
         return;
     }
-    // amazon fire (kindle)
-    else if (page.equals("/kindle-wifi/wifistub.html"))
-    {
-        ESP_LOGI(TAG, "Captive-Portal (kindle-wifi) request redirecting");
-        return doRedirect();
-    }
     else if (page.equals("/captive"))
     {
         server.sendContent(softAPhttpPreamble, strlen(softAPhttpPreamble));
