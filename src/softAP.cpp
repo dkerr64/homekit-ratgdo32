@@ -36,12 +36,8 @@ static const char softAPtableRow[] PROGMEM = R"(
 <tr %s><td><input type='radio' name='net' value='%d' %s></td><td>%s</td><td>%ddBm</td><td>%d</td><td>&nbsp;&nbsp;%02x:%02x:%02x:%02x:%02x:%02x</td></tr>)";
 static const char softAPtableLastRow[] PROGMEM = R"(
 <tr><td><input type='radio' name='net' value='%d'></td><td colspan='2'><input type='text' name='userSSID' placeholder='SSID' value='%s'></td></tr>)";
-static const char softAPsuccess[] PROGMEM = R"(
-<html>
- <head><title>Success</title></head>
- <body>Success</body>
- <script type="text/javascript">window.location.href = "\wifiap";</script>
-</html>)";
+static const char softAPsuccess[] PROGMEM = R"(<html><head><title>Success</title></head><body>Success</body><script type='text/javascript'>window.location.href = '/';</script></html>\n)";
+static const char softAPempty[] PROGMEM = R"(HTTP/1.1 204 No Content\nContent-Length: 0\n\n)";
 
 // forward declare functions
 void handle_softAPweb();
@@ -177,12 +173,10 @@ void start_soft_ap()
     server.onNotFound(handle_softAPweb);
     server.begin();
     ESP_LOGI(TAG, "Soft AP web server started");
-
 #ifdef ESP32
     // used in Android 11+ (but docs suggest it will fall back to http probe)
     WiFi.AP.enableDhcpCaptivePortal();
 #endif
-
     softAPinitialized = true;
 }
 
@@ -217,36 +211,51 @@ void soft_ap_loop()
     }
 }
 
-void doRedirect()
+void doRedirect(const char *location = "/captive")
 {
     // Redirect to root
-    server.sendHeader(F("Location"), F("/captive"), true);
-    server.send_P(302, "text/plain", "");
+    ESP_LOGD(TAG, "Send redirect to %s", location);
+    server.sendHeader(F("Location"), location, true);
+    server.send_P(302, type_txt, "");
 }
 
 void handle_softAPweb()
 {
-    HTTPMethod method = server.method();
-    String page = server.uri();
-
     if ((WiFi.getMode() & WIFI_AP) != WIFI_AP)
         return;
 
     // If we are in Soft Access Point mode
-    // ESP_LOGI(TAG, "WiFi Soft Access Point mode requesting: %s", page.c_str());
+    HTTPMethod method = server.method();
+    String page = server.uri();
+    static bool cnaHasLoaded = false;
+    static uint32_t requests = 0;
+
+    ESP_LOGD(TAG, "WiFi Soft Access Point mode, requesting: %s", page.c_str());
 
     // captive portal probes
     // apple (ios)
     if (page.equals("/hotspot-detect.html"))
     {
-        ESP_LOGI(TAG, "Captive-Portal (apple) request redirecting");
+        ESP_LOGI(TAG, "Captive-Portal (apple) request");
         return doRedirect();
     }
     // android
     else if (page.equals("/generate_204"))
     {
-        ESP_LOGI(TAG, "Captive-Portal (android) request redirecting");
-        return doRedirect();
+        ESP_LOGI(TAG, "Captive-Portal (android) request %d", requests);
+        if (!cnaHasLoaded)
+        {
+            doRedirect();
+            requests++;
+        }
+        else
+        {
+            server.sendContent(softAPempty, strlen(softAPempty));
+            ESP_LOGD(TAG, "Sent 204 No Content (android)");
+            requests = 0;
+            cnaHasLoaded = false;
+        }
+        return;
     }
     // amazon fire (kindle)
     else if (page.equals("/kindle-wifi/wifistub.html"))
@@ -256,8 +265,10 @@ void handle_softAPweb()
     }
     else if (page.equals("/captive"))
     {
-        server.send_P(200, type_html, softAPsuccess);
-        ESP_LOGD(TAG, "Sent captive success");
+        server.sendContent(softAPhttpPreamble, strlen(softAPhttpPreamble));
+        server.sendContent(softAPsuccess, strlen(softAPsuccess));
+        server.sendContent("\n", 1);
+        ESP_LOGD(TAG, "Sent 200 OK (with Success and page load)");
         return;
     }
 
@@ -270,9 +281,9 @@ void handle_softAPweb()
     {
         // windows 11 workaround
         // server.sendHeader("Location", "http://logout.net", true);
-        // server.send_P(302, "text/plain", "");
+        // server.send_P(302, type_txt, "");
 
-        server.send_P(200, "text/plain", "Microsoft Connect Test");
+        server.send_P(200, type_txt, "Microsoft Connect Test");
     }
     */
 
@@ -287,6 +298,7 @@ void handle_softAPweb()
     }
     else if (page.equals("/wifinets"))
     {
+        cnaHasLoaded = true;
         return handle_wifinets();
     }
     else if (page.equals("/setssid") && method == HTTP_POST)
