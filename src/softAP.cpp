@@ -30,12 +30,12 @@ static const char *TAG = "ratgdo-softAP";
 static const char softAPhttpPreamble[] PROGMEM = "HTTP/1.1 200 OK\nContent-Type: text/html\nCache-Control: no-cache, no-store\n\n<!DOCTYPE html>\n";
 // TODO enable advanced mode (AP selection), disabled below by setting display = none
 static const char softAPtableHead[] PROGMEM = R"(
-<tr style='display:none;'><td><input id='adv' name='advanced' type='checkbox' onclick='showAdvanced(this.checked)'></td><td colspan='2'>Advanced</td></tr>
-<tr><th></th><th>SSID</th><th>RSSI</th><th>Chan</th><th>Hardware BSSID</th></tr>)";
+<tr style='display:none;'><td></td><td><input id='adv' name='advanced' type='checkbox' onclick='showAdvanced(this.checked)'/><label for='adv'>&nbsp;Advanced</label></td></tr>
+<tr><th></th><th>&nbsp;&nbsp;SSID</th><th>RSSI</th><th>Chan</th><th>Hardware BSSID</th></tr>)";
 static const char softAPtableRow[] PROGMEM = R"(
-<tr %s><td><input type='radio' name='net' value='%d' %s></td><td>%s</td><td>%ddBm</td><td>%d</td><td>&nbsp;&nbsp;%02x:%02x:%02x:%02x:%02x:%02x</td></tr>)";
+<tr %s><td></td><td><input type='radio' id='net%d' name='net' value='%d' %s/><label for='net%d'>&nbsp;%s</label></td><td>%ddBm</td><td>%d</td><td>&nbsp;&nbsp;%02x:%02x:%02x:%02x:%02x:%02x</td></tr>)";
 static const char softAPtableLastRow[] PROGMEM = R"(
-<tr><td><input type='radio' name='net' value='%d'></td><td colspan='2'><input type='text' name='userSSID' placeholder='SSID' value='%s'></td></tr>)";
+<tr><td></td><td><input type='radio' id='net%d' name='net' value='%d'/>&nbsp;<label><input type='text' id='userSSID' name='userSSID' placeholder='SSID' value='%s'/></label></td></tr>)";
 static const char softAPsuccess[] PROGMEM = R"(<html><head><title>Success</title></head><body>Success</body><script type='text/javascript'>window.location.href = '/';</script></html>\n)";
 static const char softAPempty[] PROGMEM = R"(HTTP/1.1 204 No Content\nContent-Length: 0\n\n)";
 
@@ -257,6 +257,12 @@ void handle_softAPweb()
         }
         return;
     }
+    // amazon fire (kindle)
+    else if (page.equals("/kindle-wifi/wifistub.html"))
+    {
+        ESP_LOGI(TAG, "Captive-Portal (kindle-wifi) request redirecting");
+        return doRedirect();
+    }
     else if (page.equals("/captive"))
     {
         server.sendContent(softAPhttpPreamble, strlen(softAPhttpPreamble));
@@ -355,14 +361,14 @@ void handle_wifinets()
         {
             matchSSID = false;
         }
-        snprintf(txtBuffer, TXT_BUFFER_SIZE, softAPtableRow, (hide) ? "class='adv'" : "", i, (matchSSID) ? "checked='checked'" : "",
+        snprintf(txtBuffer, TXT_BUFFER_SIZE, softAPtableRow, (hide) ? "class='adv'" : "", i, i, (matchSSID) ? "checked='checked'" : "", i,
                  net.ssid.c_str(), net.rssi, net.channel,
                  net.bssid[0], net.bssid[1], net.bssid[2], net.bssid[3], net.bssid[4], net.bssid[5]);
         server.sendContent(txtBuffer, strlen(txtBuffer));
         i++;
     }
     // user entered value
-    snprintf(txtBuffer, TXT_BUFFER_SIZE, softAPtableLastRow, i, (!match) ? previousSSID.c_str() : "");
+    snprintf(txtBuffer, TXT_BUFFER_SIZE, softAPtableLastRow, i, i, (!match) ? previousSSID.c_str() : "");
     server.sendContent(txtBuffer, strlen(txtBuffer));
     server.sendContent("\n", 1);
     server.client().stop();
