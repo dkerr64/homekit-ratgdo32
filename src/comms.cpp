@@ -149,6 +149,16 @@ static bool is_0x37_panel = false;
 static bool door_moving = false;
 */
 
+static bool doingPartial = false;
+// helper for logs
+#define SEC1_DOOR_STATUS(s)   (s == 0x00) ? "stopped" \
+                            : (s == 0x01) ? "opening"  \
+                            : (s == 0x02) ? "open" \
+                            : (s == 0x04) ? "closing" \
+                            : (s == 0x05) ? "closed" \
+                            : (s == 0x06) ? "stopped" \
+                            : "Unknown"
+
 // For Time-to-close control
 static const uint32_t TTCinterval = 250;
 static uint32_t TTCiterations = 0;
@@ -159,6 +169,7 @@ static Ticker checkDoorMoving = Ticker();
 static Ticker checkDoorCompleted = Ticker();
 bool TTCwasLightOn = false;
 static Ticker builtInTTCcountdown = Ticker();
+static Ticker openPartialDelay = Ticker();
 
 void cancel_builtin_TTC_countdown()
 {
@@ -1339,10 +1350,14 @@ void sec1_process_message(uint8_t key, uint8_t value = 0xFF)
             // door_moving = false;
             break;
         case 0x06:
+            // if we get a stop, no matter what current state is, we are stopped (i think this is why i commented this out)
+            /*
             if (garage_door.current_state == CURR_CLOSED || garage_door.current_state == CURR_OPEN)
             {
-                ESP_LOGI(TAG, "Unusual door state change from %s to STOPPED (0x06)", (garage_door.current_state == CURR_CLOSED) ? "CLOSED" : "OPEN");
+                ESP_LOGI(TAG, "Ignoring invalid door state change from %s to STOPPED (0x06)", (garage_door.current_state == CURR_CLOSED) ? "CLOSED" : "OPEN");
+                break;
             }
+            */
             current_state = GarageDoorCurrentState::CURR_STOPPED;
             // door_moving = false;
             break;
@@ -1351,6 +1366,12 @@ void sec1_process_message(uint8_t key, uint8_t value = 0xFF)
             current_state = (GarageDoorCurrentState)0xFF;
             break;
         }
+
+        if (doingPartial) {
+            ESP_LOGI(TAG, "SEC1 status value= %s", SEC1_DOOR_STATUS(value));
+            ESP_LOGI(TAG, "SEC1 status garage_door.current_state= %s", DOOR_STATE(garage_door.current_state));
+        }
+
         update_door_state(current_state);
 
         if (!comms_status_done)
@@ -2533,6 +2554,9 @@ void door_command(DoorAction action)
 
 void door_command_close()
 {
+    // cancel partial open
+    openPartialDelay.detach();
+
 #ifdef USE_GDOLIB
     gdo_door_close();
 #else
@@ -2589,7 +2613,9 @@ void door_command_close()
 
 void door_command_open()
 {
-    ESP_LOGI(TAG, "Opening door");
+    // safety cancel partial open
+    openPartialDelay.detach();
+
 #ifdef USE_GDOLIB
     if (doorControlType == 2 && userConfig->getBuiltInTTC())
         gdo_set_time_to_close(0);
@@ -2701,6 +2727,90 @@ GarageDoorCurrentState stop_door()
 #endif
 
     return GarageDoorCurrentState::CURR_STOPPED;
+}
+
+GarageDoorCurrentState open_door_partial(int timePercentage)
+{
+    ESP_LOGD(TAG, "open_door_partial()");
+
+    if (timePercentage < 10)
+        timePercentage = 10;
+
+    uint32_t dtime = 0;
+
+    // range check and saftey
+    if (timePercentage >= 10 && timePercentage <= 90 && garage_door.openDuration && garage_door.closeDuration)
+    {
+        // round to nearest 5
+        timePercentage = std::round(timePercentage / 5) * 5;
+        ESP_LOGI(TAG, "Partial opening door (timePercentage=%d)", timePercentage);
+
+        // if door open
+        if (garage_door.current_state == GarageDoorCurrentState::CURR_OPEN)
+        {
+            ESP_LOGI(TAG, "Partial opening door from open (not supported yet)");
+            
+            /*
+            uint32_t doorCloseTimeMs = doorMedian(closeHistory.duration, std::min(closeHistory.count, DOOR_MAX_HISTORY));
+            // get delay in ms, with minimum of 1000ms
+            dtime = std::max(1000, (int)(doorCloseTimeMs - (doorCloseTimeMs * timePercentage / 100.00)));
+            //
+            ESP_LOGI(TAG, "Partial opening door from open (start)");
+            doingPartial = true;
+            door_command_close();
+            ESP_LOGI(TAG, "Partial opening door from open (delay=%dms)", dtime);
+
+            if (dtime <= 2000)
+            {
+                // fake feedback
+                update_door_state(GarageDoorCurrentState::CURR_CLOSING);
+                // stop the door check
+                checkDoorMoving.detach();
+            }
+            */
+        }
+        // if door closed
+        else if (garage_door.current_state == GarageDoorCurrentState::CURR_CLOSED)
+        {
+            uint32_t doorOpenTimeMs = doorMedian(openHistory.duration, std::min(openHistory.count, DOOR_MAX_HISTORY));
+            // get delay in ms, with minimum of 1000ms
+            dtime = std::max(1000, (int)(doorOpenTimeMs * timePercentage / 100.00));
+            //
+            ESP_LOGI(TAG, "Partial opening door from close (start)");
+            doingPartial = true;
+            door_command_open();
+            ESP_LOGI(TAG, "Partial opening door from close (delay=%dms)", dtime);
+
+            // if the amount of delay (time in which door is "opening") is short
+            // the door moving check must not happen as door would be stopped
+            // and we have to fake door opening as real message may not arrive in time
+            if (dtime <= 2000)
+            {
+                // fake feedback
+                update_door_state(GarageDoorCurrentState::CURR_OPENING);
+                // stop the door check
+                checkDoorMoving.detach();
+            }
+        }
+        else
+        {
+            ESP_LOGI(TAG, "Door not open or closed, canceling partial open request)");
+        }
+
+        // gotta do the stop after delay
+        if (dtime)
+        {
+            openPartialDelay.detach(); // just in case!
+            openPartialDelay.once_ms(dtime, []()
+                                     {
+                                        ESP_LOGI(TAG, "Partial opening door (stop)");
+                                        openPartialDelay.detach();
+                                        door_command(DoorAction::Stop); 
+                                        doingPartial = false;});
+        }
+    }
+
+    return garage_door.current_state;
 }
 
 void TTCtimerFn(void (*callback)(), bool light, bool sound)
