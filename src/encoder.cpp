@@ -11,14 +11,12 @@
  * Encoder A = DRY_CONTACT_OPEN_PIN
  * Encoder B = DRY_CONTACT_CLOSE_PIN
  */
-#ifndef ESP8266
-
+#ifdef RATGDO_ENCODER
 #include "ratgdo.h"
 #include "config.h"
 #include "comms.h"
 #include "homekit.h"
 #include "encoder.h"
-#include <driver/gpio.h>
 
 static const char *TAG = "ratgdo-encoder";
 
@@ -223,6 +221,9 @@ static void check_encoder_stopped() {
 
   enc_travel_dir_ = 0;
   enc_reverse_count_ = 0;
+  // Clear stale intent so a subsequent wall-control move in the opposite
+  // direction is never misidentified as wrong-direction and corrected.
+  enc_intended_dir_ = 0;
 
   const GarageDoorCurrentState boundary_state =
       decreasing ? (reversed ? GarageDoorCurrentState::CURR_OPEN
@@ -293,7 +294,6 @@ static void check_encoder_stopped() {
 
   if (save) {
     enc_save_cal();
-    enc_intended_dir_ = 0; // boundary reached — intent fulfilled
   }
 
   // Direction-correction retry: now that door has stopped, send the corrected
@@ -322,11 +322,7 @@ void setup_encoder() {
   enc_prev_state = (uint8_t)(((uint8_t)pa << 1) | (uint8_t)pb);
   enc_delta = 0;
 
-  // Configure encoder pins as inputs with pull-ups
-  gpio_set_direction((gpio_num_t)DRY_CONTACT_OPEN_PIN, GPIO_MODE_INPUT);
-  gpio_set_direction((gpio_num_t)DRY_CONTACT_CLOSE_PIN, GPIO_MODE_INPUT);
-  gpio_set_pull_mode((gpio_num_t)DRY_CONTACT_OPEN_PIN, GPIO_PULLUP_ONLY);
-  gpio_set_pull_mode((gpio_num_t)DRY_CONTACT_CLOSE_PIN, GPIO_PULLUP_ONLY);
+  // pinMode(input and pullup) is done in setup_drycontact() before we get here
 
   attachInterrupt(digitalPinToInterrupt(DRY_CONTACT_OPEN_PIN), isr_encoder,
                   CHANGE);
@@ -412,5 +408,4 @@ void encoder_set_intended_open() { enc_intended_dir_ = 1; }
 void encoder_set_intended_close() { enc_intended_dir_ = -1; }
 
 int16_t encoder_last_step() { return enc_last_; }
-
-#endif // !ESP8266
+#endif // RATGDO_ENCODER

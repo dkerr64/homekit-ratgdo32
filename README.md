@@ -27,7 +27,7 @@ For full history please see [CHANGELOG.md](https://github.com/ratgdo/homekit-rat
 
 - ESP32 (ratgdo32) only... Some users may get an error during OTA upload that firmware is too large for the OTA partition. See [Upgrade failures](#upgrade-failures) below for work-around.
 - Security+ 1.0 doors with digital wall panel (e.g. LiftMaster 889LM) sometimes do not close after a time-to-close delay. Please watch your door to make sure it closes after TTC delay.
-- Security+ 1.0 doors with "0x37" digital wall panel (e.g. LiftMaster 398LM) not working. We detect but do not support them. Recommend replacing with 889LM panel.
+- Security+ 1.0 doors with "0x37" digital wall panel (e.g. LiftMaster 398LM) not working. We detect but do not support them. Recommend using dry contact control protocol with ratgdo encoder.
 - When creating automations in Apple Home the garage door may show only lock/unlock and not open/close as triggers. This is a bug in Apple Home. Workaround is to use the Eve App to create the automation, it will show both options.
 
 ## How do I install it?

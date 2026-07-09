@@ -3,7 +3,7 @@
  * https://ratcloud.llc
  * https://github.com/PaulWieland/ratgdo
  *
- * Copyright (c) 2023-25 David A Kerr... https://github.com/dkerr64/
+ * Copyright (c) 2023-26 David A Kerr... https://github.com/dkerr64/
  * All Rights Reserved.
  * Licensed under terms of the GPL-3.0 License.
  *
@@ -51,9 +51,8 @@
 #ifdef RATGDO32_DISCO
 #include "vehicle.h"
 #endif
-#ifndef ESP8266
 #include "encoder.h"
-#endif
+
 // built by "build_web_content.py"
 #include "webcontent.h"
 
@@ -836,6 +835,7 @@ void build_status_json(char *json)
     JSON_ADD_INT(cfg_logLevel, userConfig->getLogLevel());
     JSON_ADD_INT(cfg_TTCseconds, userConfig->getTTCseconds());
     JSON_ADD_BOOL(cfg_TTClight, userConfig->getTTClight());
+    JSON_ADD_BOOL(cfg_lightHomeKit, userConfig->getLightHomeKit());
     JSON_ADD_INT(cfg_motionTriggers, (uint32_t)motionTriggers.asInt);
     JSON_ADD_INT(cfg_LEDidle, userConfig->getLEDidle());
     // We send milliseconds relative to current time... ie updated X milliseconds ago
@@ -854,7 +854,7 @@ void build_status_json(char *json)
     JSON_ADD_BOOL(cfg_dcBypassTTC, userConfig->getDCBypassTTC());
     JSON_ADD_BOOL(cfg_obstFromStatus, userConfig->getObstFromStatus());
     JSON_ADD_INT(cfg_dcDebounceDuration, userConfig->getDCDebounceDuration());
-#ifndef ESP8266
+#ifdef RATGDO_ENCODER
     if (doorControlType == 3)
     {
         JSON_ADD_BOOL(cfg_encoderEnabled, userConfig->getEncoderEnabled());
@@ -925,7 +925,6 @@ void build_status_json(char *json)
     JSON_ADD_BOOL(cfg_TTCsound, userConfig->getTTCsound());
 #endif
     JSON_ADD_BOOL(cfg_homespanCLI, userConfig->getEnableHomeSpanCLI());
-    JSON_ADD_BOOL(cfg_lightHomeKit, userConfig->getLightHomeKit());
     JSON_ADD_BOOL(cfg_motionHomeKit, userConfig->getMotionHomeKit());
     JSON_ADD_BOOL(cfg_stopDoorHomeKit, userConfig->getStopDoorHomeKit());
 #endif
@@ -1184,7 +1183,7 @@ bool helperAssistLaser(const std::string &key, const char *value, configSetting 
 }
 #endif
 
-#ifndef ESP8266
+#ifdef RATGDO_ENCODER
 bool helperResetEncoderCal(const std::string &key, const char *value, configSetting *action)
 {
     reset_encoder_cal();
@@ -1192,30 +1191,46 @@ bool helperResetEncoderCal(const std::string &key, const char *value, configSett
 }
 #endif
 
+// Built-in handlers that do not set a configuration value, or if they do they set multiple values.
+// {key, reboot, wifiChanged, value, fn_to_call}
+static configSetting setGDOhandlers[] PROGMEM = {
+    {"resetDoor", true, false, 0, helperResetDoor},
+    {"garageLightOn", false, false, 0, helperGarageLightOn},
+    {"garageDoorState", false, false, 0, helperGarageDoorState},
+    {"garageLockState", false, false, 0, helperGarageLockState},
+    {"credentials", false, false, 0, helperCredentials}, // parse out wwwUsername and credentials
+    {"updateUnderway", false, false, 0, helperUpdateUnderway},
+    {"factoryReset", true, false, 0, helperFactoryReset},
+#ifdef RATGDO32_DISCO
+    {"assistLaser", false, false, 0, helperAssistLaser},
+#endif
+#ifdef RATGDO_ENCODER
+    {"resetEncoderCal", false, false, 0, helperResetEncoderCal},
+#endif
+};
+static const size_t nGDOhandlers = sizeof(setGDOhandlers) / sizeof(setGDOhandlers[0]);
+
+configSetting *findGDOhandler(const char *key)
+{
+    // Keeping things simple with a linear search, since the number of gdoHandlers is small and
+    // the array cannot be assumed to be sorted. We are avoiding C++ std::map to reduce memory use.
+    configSetting *p = setGDOhandlers;
+    for (size_t i = 0; i < nGDOhandlers; ++i, ++p)
+    {
+        if (strcmp_P(key, p->key) == 0)
+        {
+            return p;
+        }
+    }
+    return nullptr;
+};
+
 void handle_setgdo()
 {
-    // Build-in handlers that do not set a configuration value, or if they do they set multiple values.
-    // key, {reboot, wifiChanged, value, fn to call}
-    static const std::unordered_map<std::string, configSetting> setGDOhandlers = {
-        {PSTR("resetDoor"), {true, false, 0, helperResetDoor}},
-        {PSTR("garageLightOn"), {false, false, 0, helperGarageLightOn}},
-        {PSTR("garageDoorState"), {false, false, 0, helperGarageDoorState}},
-        {PSTR("garageLockState"), {false, false, 0, helperGarageLockState}},
-        {PSTR("credentials"), {false, false, 0, helperCredentials}}, // parse out wwwUsername and credentials
-        {PSTR("updateUnderway"), {false, false, 0, helperUpdateUnderway}},
-        {PSTR("factoryReset"), {true, false, 0, helperFactoryReset}},
-#ifdef RATGDO32_DISCO
-        {PSTR("assistLaser"), {false, false, 0, helperAssistLaser}},
-#endif
-#ifndef ESP8266
-        {PSTR("resetEncoderCal"), {false, false, 0, helperResetEncoderCal}},
-#endif
-    };
     bool reboot = false;
     bool error = false;
     bool wifiChanged = false;
     bool saveSettings = false;
-    configSetting actions;
 
     if (!((server.args() == 1) && (server.argName(0) == cfg_timeZone)))
     {
@@ -1228,37 +1243,35 @@ void handle_setgdo()
     {
         std::string key(server.argName(i).c_str());
         std::string value(server.arg(i).c_str());
-
-        if (setGDOhandlers.count(key))
+        configSetting *setting;
+        if (nullptr != (setting = findGDOhandler(key.c_str())))
         {
             if (key == "credentials")
                 ESP_LOGI(TAG, "Call SetGDO handler for Key: %s", key.c_str());
             else
                 ESP_LOGI(TAG, "Call SetGDO handler for Key: %s, Value: %s", key.c_str(), value.c_str());
-            actions = setGDOhandlers.at(key);
-            if (actions.fn)
+            if (setting->fn)
             {
-                error = error || !actions.fn(key, value.c_str(), &actions);
+                error = error || !setting->fn(key, value.c_str(), const_cast<configSetting *>(setting));
             }
-            reboot = reboot || actions.reboot;
-            wifiChanged = wifiChanged || actions.wifiChanged;
+            reboot = reboot || setting->reboot;
+            wifiChanged = wifiChanged || setting->wifiChanged;
         }
-        else if (userConfig->contains(key))
+        else if (nullptr != (setting = userConfig->getDetail(key)))
         {
-            ESP_LOGI(TAG, "Configuration set for Key: %s, Value: %s", key.c_str(), value.c_str());
-            actions = userConfig->getDetail(key);
-            if (actions.fn)
+            ESP_LOGI(TAG, "Set configuration for Key: %s, Value: %s", key.c_str(), value.c_str());
+            if (setting->fn)
             {
                 // Value will be set within called function
-                error = error || !actions.fn(key, value.c_str(), &actions);
+                error = error || !setting->fn(key, value.c_str(), const_cast<configSetting *>(setting));
             }
             else
             {
                 // No function to call, set value directly.
                 userConfig->set(key, value.c_str());
             }
-            reboot = reboot || actions.reboot;
-            wifiChanged = wifiChanged || actions.wifiChanged;
+            reboot = reboot || setting->reboot;
+            wifiChanged = wifiChanged || setting->wifiChanged;
             saveSettings = true;
         }
         else
