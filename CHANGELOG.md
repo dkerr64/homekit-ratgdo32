@@ -4,7 +4,7 @@
 
 All notable changes to `homekit-ratgdo32` will be documented in this file. This project tries to adhere to [Semantic Versioning](http://semver.org/).
 
-## v3.5.0 (2026-07-??)
+## v3.5.0 (2026-07-12)
 
 ### What's Changed
 
@@ -12,6 +12,7 @@ All notable changes to `homekit-ratgdo32` will be documented in this file. This 
 * Feature: Added support for the [ratgdo encoder](https://ratcloud.llc/products/ratgdo-encoder)
 * Bugfix: ratgdo calibration not working from web page, https://github.com/ratgdo/homekit-ratgdo32/issues/180
 * Other: Remove use of std::map for configuration settings, replace with array of structs, to lower memory use.
+* Other: Move some Info-level log messages to Debug-level so that once in stable run mode, Info-level only logs actual activity.
 
 ### Known Issues
 
