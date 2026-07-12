@@ -1022,7 +1022,7 @@ DEV_GarageDoor::DEV_GarageDoor() : Service::GarageDoorOpener()
 
 boolean DEV_GarageDoor::update()
 {
-    ESP_LOGI(TAG, "Garage Door Characteristics Update, door target: %s", DOOR_STATE(target->getNewVal()));
+    ESP_LOGD(TAG, "Garage Door Characteristics Update, door target: %s", DOOR_STATE(target->getNewVal()));
     GarageDoorCurrentState state = (target->getNewVal() == target->OPEN) ? open_door() : close_door();
     obstruction->setVal(false);
     current->setVal(state);
@@ -1166,7 +1166,7 @@ boolean DEV_Stop::update()
 {
     if (on->getNewVal<bool>())
     {
-        ESP_LOGI(TAG, "Stop door action triggered from HomeKit");
+        ESP_LOGD(TAG, "Stop door action triggered from HomeKit");
         stop_door();
         // Now immediately reset the switch to off, so it can be triggered again for the next stop action.
         GDOEvent e;
@@ -1420,8 +1420,8 @@ void enable_service_homekit_motion(bool reboot)
 void notify_homekit_motion(bool state)
 {
     garage_door.motion = state;
-#ifdef ESP32
     garage_door.motion_timer = (!state) ? 0 : _millis() + MOTION_TIMER_DURATION;
+#ifdef ESP32
     if (!isPaired || !motion)
         return;
 
@@ -1430,7 +1430,6 @@ void notify_homekit_motion(bool state)
     e.value.b = garage_door.motion;
     queueSendHelper(motion->event_q, e, "motion");
 #else
-    garage_door.motion_timer = (!state) ? 0 : _millis() + MOTION_TIMER_DURATION;
     if (!arduino_homekit_get_running_server())
         return;
 
