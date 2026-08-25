@@ -50,8 +50,8 @@ void setup_drycontact()
 
     ESP_LOGI(TAG, "=== Setting up dry contact protocol");
 
-    if (doorControlType == 0)
-        doorControlType = userConfig->getGDOSecurityType();
+    if (doorControlType == DOOR_CONTROL_UNKNOWN)
+        doorControlType = static_cast<door_control_type_t>(userConfig->getGDOSecurityType());
 
     pinMode(DRY_CONTACT_OPEN_PIN, INPUT_PULLUP);
     pinMode(DRY_CONTACT_CLOSE_PIN, INPUT_PULLUP);
@@ -62,12 +62,12 @@ void setup_drycontact()
     buttonLight.setDebounceMs(userConfig->getDCDebounceDuration());
 
 #ifdef RATGDO_ENCODER
-    if (doorControlType == 3 && userConfig->getEncoderEnabled())
+    if (userConfig->getEncoderEnabled())
     {
+        encoder_enabled = true;
         // Encoder takes over open/close pins — only attach the light button
         buttonLight.attachPress(onLightSwitchPress);
         buttonLight.attachLongPressStop(onLightSwitchRelease);
-        setup_encoder();
         drycontact_setup_done = true;
         return;
     }
@@ -90,10 +90,9 @@ void drycontact_loop()
 
     // Poll OneButton objects (light always polled; open/close polled only when encoder not active)
 #ifdef RATGDO_ENCODER
-    if (doorControlType == 3 && userConfig->getEncoderEnabled())
+    if (encoder_enabled)
     {
         buttonLight.tick();
-        encoder_loop();
         if (dryContactLightToggle)
         {
             toggle_light();
@@ -107,7 +106,7 @@ void drycontact_loop()
     buttonClose.tick();
     buttonLight.tick();
 
-    if (doorControlType == 3)
+    if (doorControlType == DOOR_CONTROL_DRY_CONTACT)
     {
         if (dryContactDoorOpen)
         {

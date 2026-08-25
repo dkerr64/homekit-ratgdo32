@@ -424,7 +424,7 @@ void web_loop()
     JSON_ADD_BOOL_C("pinBasedObst", garage_door.pinModeObstructionSensor, last_reported_garage_door.pinModeObstructionSensor);
     JSON_ADD_BOOL_C("garageObstructed", garage_door.obstructed, last_reported_garage_door.obstructed);
     JSON_ADD_BOOL_C("garageSec1Emulated", garage_door.wallPanelEmulated, last_reported_garage_door.wallPanelEmulated);
-    if (doorControlType == 2)
+    if (doorControlType == DOOR_CONTROL_SEC_PLUS_V2)
     {
         JSON_ADD_INT_C("batteryState", garage_door.batteryState, last_reported_garage_door.batteryState);
         JSON_ADD_INT_C("openingsCount", garage_door.openingsCount, last_reported_garage_door.openingsCount);
@@ -443,6 +443,10 @@ void web_loop()
         JSON_ADD_STR(cfg_nameserverIP, userConfig->getNameserverIP());
         new_ipv4_address = false;
     }
+#ifdef RATGDO_ENCODER
+    JSON_ADD_BOOL_C("manuallyOperated", garage_door.manuallyOperated, last_reported_garage_door.manuallyOperated);
+#endif
+
 #ifndef ESP8266
     if (new_ipv6_address)
     {
@@ -590,11 +594,7 @@ void handle_notfound()
     return;
 }
 
-#ifdef ESP8266
-#define AUTHENTICATE()                                                                                                                  \
-    if (userConfig->getPasswordRequired() && !server.authenticateDigest(userConfig->getwwwUsername(), userConfig->getwwwCredentials())) \
-        return server.requestAuthentication(DIGEST_AUTH, www_realm);
-#else
+#ifndef ESP8266
 String *ratgdoAuthenticate(HTTPAuthMethod mode, String enteredUsernameOrReq, String extraParams[])
 {
     // ESP_LOGI(TAG, "Auth method: %d", mode);                // DIGEST_AUTH
@@ -604,22 +604,39 @@ String *ratgdoAuthenticate(HTTPAuthMethod mode, String enteredUsernameOrReq, Str
     String *pw = new String(read_door_str(nvram_ratgdo_pw, "password").c_str());
     return pw;
 }
-
-#define AUTHENTICATE()                                                                 \
-    if (userConfig->getPasswordRequired() && !server.authenticate(ratgdoAuthenticate)) \
-        return server.requestAuthentication(DIGEST_AUTH, www_realm);
 #endif
+
+// Returns false if a 401 challenge was sent.
+static bool requestAuthenticated()
+{
+#ifdef ESP8266
+    if (userConfig->getPasswordRequired() && !server.authenticateDigest(userConfig->getwwwUsername(), userConfig->getwwwCredentials()))
+    {
+        server.requestAuthentication(DIGEST_AUTH, www_realm);
+        return false;
+    }
+#else
+    if (userConfig->getPasswordRequired() && !server.authenticate(ratgdoAuthenticate))
+    {
+        server.requestAuthentication(DIGEST_AUTH, www_realm);
+        return false;
+    }
+#endif
+    return true;
+}
 
 void handle_auth()
 {
-    AUTHENTICATE();
+    if (!requestAuthenticated())
+        return;
     server.send_P(200, type_txt, PSTR("Authenticated"));
     return;
 }
 
 void handle_reset()
 {
-    AUTHENTICATE();
+    if (!requestAuthenticated())
+        return;
     ESP_LOGI(TAG, "... reset requested");
 #ifdef ESP8266
     homekit_storage_reset();
@@ -743,6 +760,18 @@ void handle_everything()
         ESP_LOGD(TAG, "Client %s requesting: %s (method: %s)", server.client().remoteIP().toString().c_str(), uri, http_methods[method]);
         if (method == builtInUri.at(uri).first)
         {
+            // WiFi provisioning is unauthenticated in Soft AP mode, but must
+            // require credentials once the device is on the LAN.
+            if (!softAPmode &&
+                (!strcmp(uri, "/setssid") || !strcmp(uri, "/wifinets") ||
+                 !strcmp(uri, "/rescan") || !strcmp(uri, "/wifiap")))
+            {
+                if (!requestAuthenticated())
+                {
+                    unregisterRequest();
+                    return;
+                }
+            }
             builtInUri.at(uri).second();
         }
         else
@@ -771,6 +800,14 @@ void handle_everything()
     else if (method == HTTP_GET || method == HTTP_HEAD)
     {
         // HTTP_GET that does not match a built-in handler
+        if (!softAPmode && page.equals("/wifiap.html"))
+        {
+            if (!requestAuthenticated())
+            {
+                unregisterRequest();
+                return;
+            }
+        }
         if (page.equals("/"))
         {
             load_page("/index.html");
@@ -855,16 +892,14 @@ void build_status_json(char *json)
     JSON_ADD_BOOL(cfg_obstFromStatus, userConfig->getObstFromStatus());
     JSON_ADD_INT(cfg_dcDebounceDuration, userConfig->getDCDebounceDuration());
 #ifdef RATGDO_ENCODER
-    if (doorControlType == 3)
-    {
-        JSON_ADD_BOOL(cfg_encoderEnabled, userConfig->getEncoderEnabled());
-        JSON_ADD_BOOL(cfg_encoderReversed, userConfig->getEncoderReversed());
-        if (userConfig->getEncoderEnabled())
-            JSON_ADD_INT("encSteps", (int32_t)encoder_last_step());
-    }
+    JSON_ADD_BOOL("manuallyOperated", garage_door.manuallyOperated);
+    JSON_ADD_BOOL(cfg_encoderEnabled, encoder_enabled);
+    JSON_ADD_BOOL(cfg_encoderReversed, userConfig->getEncoderReversed());
+    if (encoder_enabled)
+        JSON_ADD_INT("encSteps", (int32_t)encoder_last_step());
 #endif
     JSON_ADD_STR("qrPayload", qrPayload);
-    if (doorControlType == 2)
+    if (doorControlType == DOOR_CONTROL_SEC_PLUS_V2)
     {
         JSON_ADD_INT("batteryState", garage_door.batteryState);
         JSON_ADD_INT("openingsCount", garage_door.openingsCount);
@@ -965,7 +1000,7 @@ void add_dynamic_mdns()
     MDNS.addServiceTxt("ratgdo", "tcp", "garageLightOn", garage_door.light ? "true" : "false");
     MDNS.addServiceTxt("ratgdo", "tcp", "garageMotion", garage_door.motion ? "true" : "false");
     MDNS.addServiceTxt("ratgdo", "tcp", "garageObstructed", garage_door.obstructed ? "true" : "false");
-    if (doorControlType == 2)
+    if (doorControlType == DOOR_CONTROL_SEC_PLUS_V2)
     {
         MDNS.addServiceTxt("ratgdo", "tcp", "batteryState", std::to_string(garage_door.batteryState).c_str());
         MDNS.addServiceTxt("ratgdo", "tcp", "openingsCount", std::to_string(garage_door.openingsCount).c_str());
@@ -1078,6 +1113,7 @@ bool helperGarageLockState(const std::string &key, const char *value, configSett
 
 bool helperCredentials(const std::string &key, const char *value, configSetting *action)
 {
+#define PTR1 ((const char *)1)
     const char *newUsername = strstr(value, "username");
     const char *newCredentials = strstr(value, "credentials");
     const char *newPassword = strstr(value, "password");
@@ -1090,11 +1126,18 @@ bool helperCredentials(const std::string &key, const char *value, configSetting 
     newUsername = strchr(newUsername, ':') + 1;
     newCredentials = strchr(newCredentials, ':') + 1;
     newPassword = strchr(newPassword, ':') + 1;
+    // check that none of the strchr() calls failed.
+    if ((newUsername == PTR1) || (newCredentials == PTR1) || (newPassword == PTR1))
+        return false;
     // for strings find the double quote
     newUsername = strchr(newUsername, '"') + 1;
     newCredentials = strchr(newCredentials, '"') + 1;
     newPassword = strchr(newPassword, '"') + 1;
+    // Again check that none of the strchr() calls failed.
+    if ((newUsername == PTR1) || (newCredentials == PTR1) || (newPassword == PTR1))
+        return false;
     // null terminate the strings (at closing quote).
+    // We are trusting that if the first quote was found, the second quote will be found as well (so strchr will not return NULL)
     *strchr(newUsername, '"') = (char)0;
     *strchr(newCredentials, '"') = (char)0;
     *strchr(newPassword, '"') = (char)0;
@@ -1127,16 +1170,23 @@ bool helperUpdateUnderway(const std::string &key, const char *value, configSetti
     md5 = strchr(md5, ':') + 1;
     size = strchr(size, ':') + 1;
     uuid = strchr(uuid, ':') + 1;
+    // check that none of the strchr() calls failed.
+    if ((md5 == PTR1) || (size == PTR1) || (uuid == PTR1))
+        return false;
     // for strings find the double quote
     md5 = strchr(md5, '"') + 1;
     uuid = strchr(uuid, '"') + 1;
+    // again, check that none of the strchr() calls failed.
+    if ((md5 == PTR1) || (uuid == PTR1))
+        return false;
     // null terminate the strings (at closing quote).
+    // We are trusting that if the first quote was found, the second quote will be found as well (so strchr will not return NULL)
     *strchr(md5, '"') = (char)0;
     *strchr(uuid, '"') = (char)0;
     // ESP_LOGI(TAG,"MD5: %s, UUID: %s, Size: %d", md5, uuid, atoi(size));
     // save values...
     strlcpy(firmwareMD5, md5, sizeof(firmwareMD5));
-    firmwareSize = atoi(size);
+    firmwareSize = (size_t)atoi(size);
     for (uint32_t channel = 0; channel < SSE_MAX_CHANNELS; channel++)
     {
         if (subscription[channel].SSEconnected && subscription[channel].clientUUID == uuid && subscription[channel].client.connected())
@@ -1235,7 +1285,8 @@ void handle_setgdo()
     if (!((server.args() == 1) && (server.argName(0) == cfg_timeZone)))
     {
         // We will allow setting of time zone without authentication
-        AUTHENTICATE();
+        if (!requestAuthenticated())
+            return;
     }
 
     // Loop over all the GDO settings passed in...
@@ -1514,11 +1565,6 @@ void handle_subscribe()
         for (channel = 0; channel < SSE_MAX_CHANNELS; channel++)
             if (subscription[channel].clientIP == IPAddress(INADDR_NONE))
                 break;
-
-        if (channel < SSE_MAX_CHANNELS)
-        {
-            subscriptionCount++;
-        }
     }
 
     // Check if we found a free slot
@@ -1556,6 +1602,10 @@ void handle_subscribe()
             heartbeatInterval = (uint32_t)hbi;
         }
     }
+
+    // Count only after the slot is validated and about to be assigned
+    if (!foundExisting)
+        subscriptionCount++;
 
     // Safe assignment with validation
     subscription[channel].clientIP = clientIP;
@@ -1599,7 +1649,8 @@ void handle_showrebootlog()
 
 void handle_clearcrashlog()
 {
-    AUTHENTICATE();
+    if (!requestAuthenticated())
+        return;
     ESP_LOGI(TAG, "Clear saved crash log");
     ratgdoLogger->clearCrashLog();
     server.send_P(200, type_txt, PSTR("Crash log cleared\n"));
@@ -1710,7 +1761,8 @@ void handle_update()
 
     server.sendHeader(F("Access-Control-Allow-Headers"), "*");
     server.sendHeader(F("Access-Control-Allow-Origin"), "*");
-    AUTHENTICATE();
+    if (!requestAuthenticated())
+        return;
 
     server.client().setNoDelay(true);
     if (!verify && Update.hasError())

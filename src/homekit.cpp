@@ -353,6 +353,9 @@ static DEV_Occupancy *vehicle;
 static DEV_Light *assistLaser;
 static DEV_Occupancy *roomOccupancy;
 static DEV_Stop *stopDoor;
+#ifdef RATGDO_ENCODER
+static DEV_ManuallyOperated *manuallyOperatedSensor;
+#endif
 
 // Buffer to hold all IPv6 addresses as a single string
 char ipv6_addresses[LWIP_IPV6_NUM_ADDRESSES * IP6ADDR_STRLEN_MAX] = {0};
@@ -848,6 +851,37 @@ bool enable_service_homekit_stop(bool enable)
     return false;
 }
 
+#ifdef RATGDO_ENCODER
+bool enable_service_homekit_manually_operated(bool enable)
+{
+    if (enable)
+    {
+        if (!manuallyOperatedSensor)
+        {
+            // Define the Manually Operated accessory...
+            ESP_LOGI(TAG, "Creating HomeKit Manually Operated Service");
+            new SpanAccessory(HOMEKIT_AID_MANUALLY_OPERATED);
+            new DEV_Info("Manually Operated");
+            manuallyOperatedSensor = new DEV_ManuallyOperated();
+            homeSpan.updateDatabase();
+            return true;
+        }
+    }
+    else if (manuallyOperatedSensor)
+    {
+        // Delete the accessory, if it exists
+        ESP_LOGI(TAG, "Deleting HomeKit Manually Operated Service");
+        if (homeSpan.deleteAccessory(HOMEKIT_AID_MANUALLY_OPERATED))
+        {
+            manuallyOperatedSensor = nullptr;
+            homeSpan.updateDatabase();
+            return true;
+        }
+    }
+    return false;
+}
+#endif
+
 /****************************************************************************
  * Setup HomeKit, HomeSpan version.
  */
@@ -1045,12 +1079,17 @@ DEV_GarageDoor::DEV_GarageDoor() : Service::GarageDoorOpener()
 
 boolean DEV_GarageDoor::update()
 {
-    ESP_LOGD(TAG, "Garage Door Characteristics Update, door target: %s", DOOR_STATE(target->getNewVal()));
-    GarageDoorCurrentState state = (target->getNewVal() == target->OPEN) ? open_door() : close_door();
-    obstruction->setVal(false);
-    current->setVal(state);
+    // HomeSpan calls update() when any characteristic in this service changes.
+    // Only act on the characteristic(s) that were actually written.
+    if (target->updated())
+    {
+        ESP_LOGD(TAG, "Garage Door Characteristics Update, door target: %s", DOOR_STATE(target->getNewVal()));
+        GarageDoorCurrentState state = (target->getNewVal() == target->OPEN) ? open_door() : close_door();
+        obstruction->setVal(false);
+        current->setVal(state);
+    }
 
-    if (userConfig->getGDOSecurityType() != 3)
+    if (userConfig->getGDOSecurityType() != 3 && lockTarget && lockTarget->updated())
     {
         // Dry contact cannot control lock
         set_lock(lockTarget->getNewVal() == lockTarget->LOCK);
@@ -1211,6 +1250,29 @@ void DEV_Stop::loop()
     }
 }
 
+#ifdef RATGDO_ENCODER
+/****************************************************************************
+ * Manually Operated Contact Sensor Service Handler
+ */
+DEV_ManuallyOperated::DEV_ManuallyOperated() : Service::ContactSensor()
+{
+    ESP_LOGI(TAG, "Configuring HomeKit Contact Sensor Service for manually operated state");
+    event_q = xQueueCreate(10, sizeof(GDOEvent));
+    DEV_ManuallyOperated::state = new Characteristic::ContactSensorState(state->DETECTED);
+}
+
+void DEV_ManuallyOperated::loop()
+{
+    if (uxQueueMessagesWaiting(event_q) > 0)
+    {
+        GDOEvent e;
+        xQueueReceive(event_q, &e, 0);
+        ESP_LOGD(TAG, "Manually Operated contact sensor has turned %s", e.value.b ? "open" : "closed");
+        DEV_ManuallyOperated::state->setVal(e.value.b ? state->NOT_DETECTED : state->DETECTED);
+    }
+}
+#endif
+
 /****************************************************************************
  * HomeKit notification functions only for ESP32
  */
@@ -1269,6 +1331,19 @@ void notify_homekit_vehicle_departing(bool vehicleDeparting)
     e.value.b = vehicleDeparting;
     queueSendHelper(departing->event_q, e, "departing");
 }
+
+#ifdef RATGDO_ENCODER
+void notify_homekit_manually_operated(bool state)
+{
+    if (!isPaired || !manuallyOperatedSensor)
+        return;
+
+    GDOEvent e;
+    e.c = nullptr;
+    e.value.b = state;
+    queueSendHelper(manuallyOperatedSensor->event_q, e, "manually operated");
+}
+#endif
 
 // on ESP8266 this is provided by the Arduino HomeKit library
 bool homekit_is_paired()

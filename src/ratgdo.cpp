@@ -45,6 +45,9 @@
 #ifndef USE_GDOLIB
 #include "drycontact.h"
 #endif
+#ifdef RATGDO_ENCODER
+#include "encoder.h"
+#endif
 
 // Logger tag
 static const char *TAG = "ratgdo-main";
@@ -76,6 +79,15 @@ GarageDoor garage_door = {
     .builtInTTC = 0,
     .builtInTTCremaining = 0,
     .builtInTTChold = false,
+#ifndef ESP8266
+    .room_occupancy_timeout = 0,
+    .room_occupied = false,
+#endif
+#ifdef RATGDO_ENCODER
+    .manuallyOperated = false,
+    .protocol_door_state = (GarageDoorCurrentState)0xFF,
+    .encoder_door_state = (GarageDoorCurrentState)0xFF,
+#endif
 };
 
 // Some initialization is postponed until after we have an IP address
@@ -267,6 +279,9 @@ void setup()
 #ifndef USE_GDOLIB
     setup_drycontact();
 #endif
+#ifdef RATGDO_ENCODER
+    setup_encoder();
+#endif
 
     // Finally initialize WiFi and HomeKit
 #ifdef ESP8266
@@ -324,7 +339,7 @@ void loop()
         ESP_LOGI(TAG, "Free sys stack at boot:     %d", free_sys_stack_at_boot);
         ESP_LOGI(TAG, "Current minimum sys stack:  %d", free_sys_stack);
 #endif
-        if (doorControlType == 2)
+        if (doorControlType == DOOR_CONTROL_SEC_PLUS_V2)
         {
             ESP_LOGI(TAG, "Our ID code %lu (0x%02lX)", id_code, id_code);
             ESP_LOGI(TAG, "Our rolling code %lu (0x%02X)", rolling_code, rolling_code);
@@ -344,6 +359,9 @@ void loop()
     comms_loop();
 #ifndef USE_GDOLIB
     drycontact_loop();
+#endif
+#ifdef RATGDO_ENCODER
+    encoder_loop();
 #endif
 #ifdef ESP8266
     // On ESP8266 we handle WiFi and HomeKit ourselves
