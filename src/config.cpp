@@ -86,6 +86,9 @@ bool helperLightHomeKit(const std::string &key, const char *value, configSetting
 bool helperMotionHomeKit(const std::string &key, const char *value, configSetting *action);
 bool helperStopDoorHomeKit(const std::string &key, const char *value, configSetting *action);
 #endif
+#ifdef USE_GDOLIB
+bool helperUseSWserial(const std::string &key, const char *value, configSetting *action);
+#endif // USE_GDOLIB
 
 #ifdef ESP8266
 static inline bool isPROGMEM(const void *ptr)

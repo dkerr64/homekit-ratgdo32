@@ -634,7 +634,7 @@ static void gdo_event_handler(const gdo_status_t *status, gdo_cb_event_t event, 
 /****************************************************************************
  * Initialize communications with garage door.
  */
-
+#ifndef USE_GDOLIB
 void initialize_gdo_codes(uint32_t id)
 {
     if (doorControlType != DOOR_CONTROL_SEC_PLUS_V2)
@@ -665,6 +665,7 @@ void initialize_gdo_codes(uint32_t id)
     send_get_status();
     send_get_version();
 }
+#endif // USE_GDOLIB
 
 void setup_comms()
 {
@@ -2393,7 +2394,8 @@ void comms_loop_drycontact()
         handle_protocol_door_state(doorState);
     }
 }
-#endif
+#endif // USE_GDOLIB
+
 void comms_loop()
 {
     if (!comms_setup_done)
@@ -2932,6 +2934,10 @@ GarageDoorCurrentState stop_door()
 
 GarageDoorCurrentState open_door_partial(int timePercentage)
 {
+#ifdef USE_GDOLIB
+    // TODO: Implement partial opening with GDOLIB.
+    return garage_door.current_state;
+#else
     _millis_t dtime = 0;
 
     if (timePercentage < 10)
@@ -3004,8 +3010,8 @@ GarageDoorCurrentState open_door_partial(int timePercentage)
                                         doingPartial = false;
                                         door_command(DoorAction::Stop); });
     }
-
     return garage_door.current_state;
+#endif // USE_GDOLIB
 }
 
 void TTCtimerFn(void (*callback)(), bool light, bool sound)
