@@ -166,7 +166,7 @@ static configSetting settings_defaults[] PROGMEM = {
     {cfg_TTCsound, false, false, true, NULL},
 #endif
 #ifdef USE_GDOLIB
-    {cfg_useSWserial, true, false, true, helperUseSWserial}, // call fn to shut down GDO before switch
+    {cfg_useSWserial, true, false, false, helperUseSWserial}, // call fn to shut down GDO before switch
 #endif
     {cfg_builtInTTC, false, false, 0, helperBuiltInTTC},
     {cfg_reverseOnStop, false, false, true, NULL},
